@@ -4,3 +4,8 @@
 plugins/*/config.json
 plugins/*/node_modules/
 dev*.sh
+/*.log
+/tile-*.png
+/tile-mobile-*.png
+/tile-*-test.js
+/ws-*.js

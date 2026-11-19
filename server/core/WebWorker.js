@@ -23,6 +23,7 @@ const { canonicalGenre } = require('./genres/genreUtils');
 const Fb2Helper = require('./fb2/Fb2Helper');
 const EpubHelper = require('./epub/EpubHelper');
 const { bookContentType } = require('./book/bookFormats');
+const { jxlConvert } = require('./book/bookImages');
 
 // 7z read and covers
 const { extractFb2Data } = require('./fb2/fb2Cover');
@@ -37,15 +38,37 @@ const Favorites = require('./Favorites');
 const ssNormal = 'normal';
 const ssDbLoading = 'db_loading';
 const ssDbCreating = 'db_creating';
+const ssDbReleased = 'db_released';
 
 const stateToText = {
     [ssNormal]: '',
     [ssDbLoading]: 'Загрузка поисковой базы',
     [ssDbCreating]: 'Создание поисковой базы',
+    [ssDbReleased]: 'Память освобождена, ожидание запроса',
 };
 
 const cleanDirInterval = 60*60*1000;//каждый час
 const checkReleaseInterval = 7*60*60*1000;//каждые 7 часов
+
+//детерминированный PRNG для стабильной случайности ленты
+function stringHash(str) {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < str.length; i++) {
+        h ^= str.charCodeAt(i);
+        h = Math.imul(h, 0x01000193);
+    }
+    return h >>> 0;
+}
+
+function mulberry32(a) {
+    return () => {
+        a |= 0;
+        a = (a + 0x6D2B79F5) | 0;
+        let t = Math.imul(a ^ (a >>> 15), 1 | a);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+}
 
 //singleton
 let instance = null;
@@ -71,10 +94,14 @@ class WebWorker {
             this.db = null;
             this.dbSearcher = null;
 
+            this.lastActivity = Date.now();
+            this._reloadPromise = null;
+
             asyncExit.add(this.closeDb.bind(this));
 
             this.loadOrCreateDb();//no await
             this.periodicLogServerStats();//no await
+            this.periodicIdleRelease();//no await
 
             const dirConfig = [
                 {
@@ -92,6 +119,7 @@ class WebWorker {
             this.periodicCheckNewRelease();//no await
             this.reviewsReader = null;
             this.authorBioReader = null;
+            this._restoring = new Map();
 
             instance = this;
         }
@@ -99,7 +127,17 @@ class WebWorker {
         return instance;
     }
 
+    noteActivity() {
+        this.lastActivity = Date.now();
+    }
+
     checkMyState() {
+        //первый запрос после освобождения памяти — запускаем загрузку БД
+        if (this.myState == ssDbReleased && !this._reloadPromise) {
+            this._reloadPromise = this.loadOrCreateDb();
+            this._reloadPromise.catch(() => {});
+            this._reloadPromise.finally(() => { this._reloadPromise = null; });
+        }
         if (this.myState != ssNormal)
             throw new Error('server_busy');
     }
@@ -344,6 +382,57 @@ class WebWorker {
         await this.loadOrCreateDb(true);
     }
 
+    async releaseMemory() {
+        if (this.myState != ssNormal)
+            return;
+
+        const memBefore = process.memoryUsage().rss;
+        log(`Idle timeout: releasing memory, rss=${(memBefore/1024/1024).toFixed(1)}MB`);
+
+        this.setMyState(ssDbLoading);
+
+        try {
+            if (this.dbSearcher) {
+                await this.dbSearcher.close();
+                this.dbSearcher = null;
+            }
+
+            this.reviewsReader = null;
+            this.authorBioReader = null;
+            this._restoring.clear();
+
+            await this.closeDb();
+        } finally {
+            this.setMyState(ssDbReleased);
+        }
+
+        this.lastActivity = Date.now();
+        utils.freeMemory();
+
+        const memAfter = process.memoryUsage().rss;
+        log(`Memory released: rss ${(memBefore/1024/1024).toFixed(1)}MB -> ${(memAfter/1024/1024).toFixed(1)}MB`);
+    }
+
+    async periodicIdleRelease() {
+        const idleInterval = this.config.idleReleaseInterval;
+        if (!idleInterval)
+            return;
+
+        while (1) {// eslint-disable-line no-constant-condition
+            await utils.sleep(60*1000);//интервал проверки 1 минута
+            if (this.myState == ssNormal && Date.now() - this.lastActivity >= idleInterval) {
+                if (this.config.idleExit) {
+                    //полный выход процесса (работает под watchdog)
+                    const mem = process.memoryUsage().rss;
+                    log(`Idle timeout: exiting to release memory, rss=${(mem/1024/1024).toFixed(1)}MB`);
+                    asyncExit.exit(0);
+                } else {
+                    await this.releaseMemory();
+                }
+            }
+        }
+    }
+
     async dbConfig() {
         this.checkMyState();
 
@@ -377,6 +466,17 @@ class WebWorker {
         this.checkMyState();
 
         const result = await this.dbSearcher.bookSearch(query);
+
+        const config = await this.dbConfig();
+        result.inpxHash = (config.inpxHash ? config.inpxHash : '');
+
+        return result;
+    }
+
+    async bookSearchAny(query) {
+        this.checkMyState();
+
+        const result = await this.dbSearcher.bookSearchAny(query);
 
         const config = await this.dbConfig();
         result.inpxHash = (config.inpxHash ? config.inpxHash : '');
@@ -507,6 +607,495 @@ class WebWorker {
         return result;
     }
 
+    //----------------------------------------------------------------------------
+    //tile-интерфейс
+
+    async getTilePools() {
+        this.checkMyState();
+
+        const db = this.db;
+        const config = await this.dbConfig();
+        const inpxHash = (config.inpxHash ? config.inpxHash : '');
+
+        if (db.wwCache.tilePools && db.wwCache.tilePools.inpxHash === inpxHash)
+            return db.wwCache.tilePools;
+
+        const genreTree = await this.getGenreTree();
+        const sections = genreTree.genreTree.map((s) => ({
+            name: s.name,
+            values: s.value.map((g) => g.value),
+        }));
+        const years = [2022, 2023, 2024, 2025, 2026];
+
+        const pools = await this.dbSearcher.tilePools(sections, years);
+
+        //топ-200 авторов по средней оценке (только оцененные книги)
+        const idMap = this.dbSearcher.bookIdMap['author'];
+        const agg = new Map();
+        const ratedIds = pools.ratedIds;
+        const ratedRates = pools.ratedRates;
+        pools.ratedIds = null;
+        pools.ratedRates = null;
+
+        const addAgg = (agg, aid, rate) => {
+            let a = agg.get(aid);
+            if (!a) {
+                a = {id: aid, sum: 0, count: 0};
+                agg.set(aid, a);
+            }
+            a.sum += rate;
+            a.count++;
+        };
+
+        for (let i = 0; i < ratedIds.length; i++) {
+            const bid = ratedIds[i];
+            const tId = idMap.arr[bid];
+            if (tId) {
+                addAgg(agg, tId, ratedRates[i]);
+            } else {
+                const tIds = idMap.map.get(bid);
+                if (tIds)
+                    for (const aid of tIds)
+                        addAgg(agg, aid, ratedRates[i]);
+            }
+        }
+
+        const authors = [];
+        for (const a of agg.values())
+            authors.push({id: a.id, avg: a.sum / a.count, count: a.count});
+        authors.sort((a, b) => (b.avg - a.avg) || (b.count - a.count));
+
+        db.wwCache.tilePools = {inpxHash, pools, authors: authors.slice(0, 200)};
+        return db.wwCache.tilePools;
+    }
+
+    //одна выборка записей таблицы (author/series) по набору названий
+    async nameToRowMap(table, names) {
+        const list = Array.from(new Set(names));
+        if (!list.length)
+            return new Map();
+
+        const db = this.db;
+        const rows = await db.select({
+            table,
+            map: `(r) => ({value: r.value, id: r.id, bookCount: r.bookCount})`,
+            where: `
+                const names = ${db.esc(list)};
+                const ids = new Set();
+                for (const n of names) {
+                    for (const id of @dirtyIndexLR('value', n.toLowerCase(), n.toLowerCase()))
+                        ids.add(id);
+                }
+                return ids;
+            `,
+        });
+
+        const byValue = new Map(rows.map((r) => [r.value, r]));
+        const result = new Map();
+        for (const n of list) {
+            const row = byValue.get(n.toLowerCase());
+            if (row)
+                result.set(n, row);
+        }
+        return result;
+    }
+
+    //подставляем authorId (id первого автора) в записи книг
+    async addAuthorIds(rows) {
+        const names = new Set();
+        for (const b of rows) {
+            const a = (b.author ? b.author.split(',')[0] : '').trim();
+            if (a)
+                names.add(a);
+        }
+
+        const map = await this.nameToRowMap('author', names);
+        for (const b of rows) {
+            const a = (b.author ? b.author.split(',')[0] : '').trim();
+            const row = (a ? map.get(a) : null);
+            b.authorId = (row ? row.id : 0);
+        }
+    }
+
+    async getTileHome(seed) {
+        this.checkMyState();
+
+        seed = (parseInt(seed, 10) || 0) >>> 0;
+
+        const {pools, authors} = await this.getTilePools();
+
+        //детерминированный выбор из пулов: seed + ключ ленты
+        const seedFor = (key) => mulberry32(seed ^ stringHash(key));
+        const sample = (arr, n, key) => {
+            const rnd = seedFor(key);
+            const a = arr.slice();
+            const m = Math.min(n, a.length);
+            for (let i = 0; i < m; i++) {
+                const j = i + Math.floor(rnd() * (a.length - i));
+                const t = a[i]; a[i] = a[j]; a[j] = t;
+            }
+            return a.slice(0, m);
+        };
+
+        const sectionNames = [];
+        const {genreTree} = await this.getGenreTree();
+        for (const s of genreTree)
+            sectionNames.push(s.name);
+
+        const db = this.db;
+        const needIds = new Set();
+        const addNeed = (rows) => {
+            for (const r of rows)
+                needIds.add(r.id);
+        };
+
+        const newBooks = sample(pools.new, 20, 'home-new');
+        addNeed(newBooks);
+
+        const topBooks = sample(pools.top, 20, 'home-top');
+        addNeed(topBooks);
+
+        //серии: группируем последние/топ-200 книг, берем 20 случайных серий
+        const seriesCards = (rows, key) => {
+            const list = rows.slice(0, 200);
+            const groups = new Map();
+            for (const b of list) {
+                if (!b.series)
+                    continue;
+                let g = groups.get(b.series);
+                if (!g) {
+                    g = [];
+                    groups.set(b.series, g);
+                }
+                g.push(b);
+            }
+            const names = Array.from(groups.keys());
+            const picked = sample(names, 20, key);
+            return picked.map((name) => {
+                const g = groups.get(name);
+                g.sort((a, b) => (a.serno - b.serno) || (a.insno - b.insno));
+                return {series: name, book: g[0]};
+            });
+        };
+        const seriesNew = seriesCards(pools.new, 'home-series-new');
+        const seriesTop = seriesCards(pools.top, 'home-series-top');
+        for (const c of seriesNew.concat(seriesTop))
+            addNeed([c.book]);
+
+        //количество книг в каждой серии
+        const seriesMap = await this.nameToRowMap('series', seriesNew.concat(seriesTop).map((c) => c.series));
+        for (const c of seriesNew.concat(seriesTop)) {
+            const row = seriesMap.get(c.series);
+            c.count = (row ? row.bookCount : 0);
+        }
+
+        const yearFeeds = [];
+        for (const y of [2022, 2023, 2024, 2025, 2026]) {
+            const arr = pools.years[y] || [];
+            if (arr.length) {
+                const books = sample(arr, 20, `home-year-${y}`);
+                addNeed(books);
+                yearFeeds.push({year: y, books});
+            }
+        }
+
+        //жанры: по каждой секции — «новые» (фильтр из pools.new) и «лучшие»
+        const genreFeeds = [];
+        for (let i = 0; i < genreTree.length; i++) {
+            const vset = new Set(genreTree[i].value.map((g) => g.value));
+            const recent = [];
+            for (const b of pools.new) {
+                if (recent.length >= 200)
+                    break;
+                if (b.genre) {
+                    const gs = b.genre.split(',');
+                    for (const g of gs) {
+                        if (vset.has(g)) {
+                            recent.push(b);
+                            break;
+                        }
+                    }
+                }
+            }
+            const feed = {
+                name: sectionNames[i],
+                value: genreTree[i].value.map((g) => g.value).join(','),
+                new: sample(recent, 20, `genre-new-${i}`),
+                best: sample(pools.sections[i] || [], 20, `genre-best-${i}`),
+            };
+            addNeed(feed.new.concat(feed.best));
+            genreFeeds.push(feed);
+        }
+
+        //авторы: 8 случайных из топ-200, у каждого случайная книга
+        const pickedAuthors = sample(authors, 8, 'home-authors');
+        const authorCards = [];
+        if (pickedAuthors.length) {
+            const rows = await db.select({
+                table: 'author',
+                where: `@@id(${db.esc(pickedAuthors.map((a) => a.id))})`
+            });
+            const byId = new Map(rows.map((r) => [r.id, r]));
+
+            for (const a of pickedAuthors) {
+                const row = byId.get(a.id);
+                if (!row || !row.bookIds || !row.bookIds.length)
+                    continue;
+
+                const rnd = seedFor(`author-${a.id}`);
+                const bid = row.bookIds[Math.floor(rnd() * row.bookIds.length)];
+                needIds.add(bid);
+                authorCards.push({id: a.id, name: row.name, avg: a.avg, count: a.count, bookId: bid});
+            }
+        }
+
+        //одна выборка всех нужных записей книг
+        const bookRows = needIds.size ?
+            await db.select({table: 'book', where: `@@id(${db.esc(Array.from(needIds))})`}) : [];
+        await this.addAuthorIds(bookRows);
+        const rowById = new Map(bookRows.map((r) => [r.id, r]));
+        const getRow = (b) => (rowById.get(b.id) || b);
+
+        return {
+            seed,
+            new: newBooks.map(getRow),
+            top: topBooks.map(getRow),
+            seriesNew: seriesNew.map((c) => ({series: c.series, count: c.count, book: getRow(c.book)})),
+            seriesTop: seriesTop.map((c) => ({series: c.series, count: c.count, book: getRow(c.book)})),
+            years: yearFeeds.map((f) => ({year: f.year, books: f.books.map(getRow)})),
+            genres: genreFeeds,
+            authors: authorCards.map((c) => ({
+                id: c.id, name: c.name, avg: c.avg, count: c.count,
+                book: (rowById.get(c.bookId) || null),
+            })),
+        };
+    }
+
+    tileSortRows(rows, sort) {
+        const cmp =
+            (sort === 'rate') ? ((a, b) => (b.librate - a.librate) || (a.insno - b.insno)) :
+            (sort === 'year') ? ((a, b) => ((parseInt(b.year, 10) || 0) - (parseInt(a.year, 10) || 0)) || (b.insno - a.insno) || (b.id - a.id)) :
+            (sort === 'serno') ? ((a, b) => this.sernoCmp(a, b)) :
+            ((a, b) => (b.insno - a.insno) || (b.id - a.id));
+        return rows.slice().sort(cmp);
+    }
+
+    //порядок книг внутри серии: с номером — по номеру, без номера — по дате поступления
+    sernoCmp(a, b) {
+        const sa = (a.serno > 0 ? a.serno : 0);
+        const sb = (b.serno > 0 ? b.serno : 0);
+        if (sa && sb)
+            return (sa - sb) || (b.insno - a.insno) || (b.id - a.id);
+        if (sa)
+            return -1;
+        if (sb)
+            return 1;
+        return (b.insno - a.insno) || (b.id - a.id);
+    }
+
+    //книги автора лентами по сериям: серии — по новому поступлению, внутри — по нумерации; без серии — в конце
+    authorSeriesFeeds(books) {
+        const bySeries = new Map();
+        const noSeries = [];
+        for (const book of books) {
+            const s = (book.series || '').trim();
+            if (!s) {
+                noSeries.push(book);
+                continue;
+            }
+            const key = s.toLowerCase();
+            let g = bySeries.get(key);
+            if (!g) {
+                g = {series: s, maxInsno: 0, books: []};
+                bySeries.set(key, g);
+            }
+            if (book.insno > g.maxInsno)
+                g.maxInsno = book.insno;
+            g.books.push(book);
+        }
+        for (const g of bySeries.values())
+            g.books.sort((a, b) => this.sernoCmp(a, b));
+        const feeds = Array.from(bySeries.values())
+            .sort((a, b) => (b.maxInsno - a.maxInsno) || a.series.localeCompare(b.series, 'ru'));
+        noSeries.sort((a, b) => (b.insno - a.insno) || (b.id - a.id));
+        return {feeds, noSeries};
+    }
+
+    //лёгкий список книг серии для блока серии на странице книги: по нумерации, без номера — по поступлению
+    lightSeriesBooks(books) {
+        return books
+            .filter((b) => !b.del)
+            .sort((a, b) => this.sernoCmp(a, b))
+            .map((b) => ({uid: b._uid, title: b.title, serno: (b.serno || 0), year: (b.year || '')}));
+    }
+
+    async getTileSection(params) {
+        this.checkMyState();
+
+        const type = params.type;
+        const value = params.value;
+        const offset = parseInt(params.offset, 10) || 0;
+        let limit = parseInt(params.limit, 10) || 50;
+        if (limit > 500)
+            limit = 500;
+        const sort = ['new', 'rate', 'year', 'serno', 'series'].indexOf(params.sort) >= 0 ? params.sort : 'new';
+
+        const db = this.db;
+        let books = [];
+        let total = 0;
+        const meta = {type, value};
+
+        if (type === 'genre') {
+            const ids = await this.dbSearcher.sortedBookIds({genre: value}, (sort === 'rate' ? 'rate' : 'new'));
+            total = ids.length;
+            const slice = Array.from(ids.slice(offset, offset + limit));
+            if (slice.length)
+                books = await db.select({table: 'book', where: `@@id(${db.esc(slice)})`});
+        } else if (type === 'author') {
+            //клиент передаёт id автора (строка), если не число — имя
+            const authorId = /^\d+$/.test(value) ? parseInt(value, 10) : '';
+            const res = await this.dbSearcher.getAuthorBookList(authorId, authorId ? '' : value);
+            meta.author = res.author;
+            if (res.author) {
+                const normalized = res.author.split(/\s+/).filter(Boolean).join(' ').toLowerCase().trim();
+                meta.authorHash = utils.getBufHash(Buffer.from(normalized, 'utf8'), 'md5', 'hex');
+            }
+
+            if (sort === 'series') {
+                //ленты серий без пагинации
+                const {feeds, noSeries} = this.authorSeriesFeeds(res.books);
+                total = res.books.length;
+                meta.seriesFeeds = feeds.map((f) => ({series: f.series, count: f.books.length, books: f.books}));
+                meta.noSeries = noSeries;
+                //авторские id проставим на все книги лент (сами ленты уже в meta)
+                const allFeedBooks = [];
+                for (const f of meta.seriesFeeds)
+                    allFeedBooks.push(...f.books);
+                allFeedBooks.push(...noSeries);
+                await this.addAuthorIds(allFeedBooks);
+            } else {
+                books = this.tileSortRows(res.books, sort);
+                total = books.length;
+                books = books.slice(offset, offset + limit);
+            }
+        } else if (type === 'series') {
+            const res = await this.dbSearcher.getSeriesBookList(value);
+            books = this.tileSortRows(res.books, (sort === 'new' || sort === 'rate' || sort === 'year' ? sort : 'serno'));
+            total = books.length;
+            books = books.slice(offset, offset + limit);
+        } else if (type === 'year') {
+            const {pools} = await this.getTilePools();
+            const arr = pools.years[value] || [];
+            books = arr.slice(offset, offset + limit);
+            total = arr.length;
+        } else {
+            throw new Error(`unknown section type: ${type}`);
+        }
+
+        await this.addAuthorIds(books);
+        return Object.assign({books, total}, meta);
+    }
+
+    async getTileBook(bookUid) {
+        this.checkMyState();
+
+        const book = await this.getBookRecord(bookUid);
+        if (!book)
+            throw new Error('404 Book not found');
+
+        await this.addAuthorIds([book]);
+        const covers = await this.getBookCovers([bookUid]);
+
+        const result = {book, cover: (covers[bookUid] || '')};
+        const series = (book.series || '').trim();
+        if (series) {
+            const res = await this.dbSearcher.getSeriesBookList(series);
+            result.seriesBooks = this.lightSeriesBooks(res.books);
+        }
+        return result;
+    }
+
+    async getBookCovers(bookUids) {
+        this.checkMyState();
+
+        const db = this.db;
+        const result = {};
+
+        const rows = await db.select({table: 'book', where: `@@hash('_uid', ${db.esc(bookUids)})`});
+        if (!rows.length)
+            return result;
+
+        const config = this.config;
+        //в root bookDir с расширением: подпапку /cover удаляет middleware восстановления /book/:fileName
+        const coverDir = config.bookDir;
+
+        //группируем книги по архиву обложек
+        const byPath = new Map();
+        for (const book of rows) {
+            const coverPath = path.join(config.libDir, 'covers', book.folder);
+            let arr = byPath.get(coverPath);
+            if (!arr) {
+                arr = [];
+                byPath.set(coverPath, arr);
+            }
+            arr.push(book);
+        }
+
+        const pathQueue = Array.from(byPath.entries());
+
+        const worker = async() => {
+            while (pathQueue.length) {
+                const [coverPath, books] = pathQueue.shift();
+                if (!await fs.pathExists(coverPath))
+                    continue;
+
+                const zipReader = new ZipReader();
+                try {
+                    await zipReader.open(coverPath);
+
+                    for (const book of books) {
+                        const key = `${book.folder}/${book.file}`;
+                        const hash = crypto.createHash('md5').update(key).digest('hex');
+
+                        let link = '';
+                        for (const ext of ['jpg', 'png']) {
+                            if (await fs.pathExists(path.join(coverDir, `${hash}.${ext}`))) {
+                                link = `${config.bookPathStatic}/${hash}.${ext}`;
+                                break;
+                            }
+                        }
+
+                        if (!link && (book.file in zipReader.zipEntries)) {
+                            const coverBuff = await zipReader.extractToBuf(book.file);
+                            if (coverBuff) {
+                                const {outputImg, ext} = await jxlConvert(coverBuff);
+                                if (outputImg.length) {
+                                    const fileExt = (ext === 'jpeg' ? 'jpg' : ext);
+                                    await fs.writeFile(path.join(coverDir, `${hash}.${fileExt}`), outputImg);
+                                    link = `${config.bookPathStatic}/${hash}.${fileExt}`;
+                                }
+                            }
+                        }
+                        if (link)
+                            result[book._uid] = link;
+                    }
+                } catch (e) {
+                    //битый архив обложек — пропускаем
+                    log(LM_ERR, `getBookCovers error: ${e.message}`);
+                } finally {
+                    try { await zipReader.close(); } catch (e) {}
+                }
+            }
+        };
+
+        const workers = [];
+        for (let i = 0; i < 8; i++)
+            workers.push(worker());
+        await Promise.all(workers);
+
+        return result;
+    }
+
     async extractBook(libFolder, libFile) {
         const outFile = `${this.config.tempDir}/${utils.randomHexString(30)}`;
 
@@ -600,8 +1189,20 @@ class WebWorker {
         return rawFile;
     }
 
-
+    //одинаковые параллельные запросы (get-book-reviews + get-book-info) должны ждать одну операцию,
+    //иначе два 7z извлекут один и тот же файл и второй получит "Cannot delete output file"
     async restoreBook(bookUid, libFolder, libFile, downFileName) {
+        let p = this._restoring.get(bookUid);
+        if (!p) {
+            p = this._restoreBook(bookUid, libFolder, libFile, downFileName);
+            this._restoring.set(bookUid, p);
+            p.catch(() => {}).finally(() => this._restoring.delete(bookUid));
+        }
+
+        return p;
+    }
+
+    async _restoreBook(bookUid, libFolder, libFile, downFileName) {
         const db = this.db;
 
         let extractedFile = '';
@@ -980,8 +1581,8 @@ class WebWorker {
     }
 
     async getAuthorBio(hash) {
-        const {bio} = await this.materializeBio(hash);
-        return bio;
+        const {bio, photo} = await this.materializeBio(hash);
+        return {bio, hasPhoto: !!photo};
     }
 
     async getAuthorPhoto(hash) {

@@ -24,6 +24,8 @@ class WebSocketController {
         this.wss = wss;
 
         wss.on('connection', (ws) => {
+            this.webWorker.noteActivity();
+
             ws.on('message', (message) => {
                 this.onMessage(ws, message.toString());
             });
@@ -66,6 +68,7 @@ class WebSocketController {
             req.__startTime = Date.now();
 
             ws.lastActivity = Date.now();
+            this.webWorker.noteActivity();
             
             //pong for WebSocketConnection
             this.send({_rok: 1}, req, ws);
@@ -92,6 +95,8 @@ class WebSocketController {
                     await this.search(req, ws); break;
                 case 'bookSearch':
                     await this.bookSearch(req, ws); break;
+                case 'bookSearchAny':
+                    await this.bookSearchAny(req, ws); break;
                 case 'get-author-book-list':
                     await this.getAuthorBookList(req, ws); break;
                 case 'get-author-series-list':
@@ -128,6 +133,15 @@ class WebSocketController {
                     await this.addFavorite(req, ws); break;
                 case 'remove-favorite':
                     await this.removeFavorite(req, ws); break;
+
+                case 'get-tile-home':
+                    await this.getTileHome(req, ws); break;
+                case 'get-tile-section':
+                    await this.getTileSection(req, ws); break;
+                case 'get-tile-book':
+                    await this.getTileBook(req, ws); break;
+                case 'get-covers':
+                    await this.getCovers(req, ws); break;
 
                 case 'get-inpx-file':
                     await this.getInpxFile(req, ws); break;
@@ -214,6 +228,15 @@ class WebSocketController {
             throw new Error(`query is empty`);
 
         const result = await this.webWorker.bookSearch(req.query);
+
+        this.send(result, req, ws);
+    }
+
+    async bookSearchAny(req, ws) {
+        if (!req.query || !req.query.q)
+            throw new Error(`query is empty`);
+
+        const result = await this.webWorker.bookSearchAny(req.query);
 
         this.send(result, req, ws);
     }
@@ -329,9 +352,9 @@ class WebSocketController {
         if (!utils.hasProp(req, 'hash'))
             throw new Error(`hash is empty`);
 
-        const bio = await this.webWorker.getAuthorBio(req.hash);
+        const result = await this.webWorker.getAuthorBio(req.hash);
 
-        this.send({bio}, req, ws);
+        this.send(result, req, ws);
     }
 
     async getBioLink(req, ws) {
@@ -417,6 +440,43 @@ class WebSocketController {
             return this.send({data: null, hash: res.hash}, req, ws);
 
         this.send({data: res.data.toString('base64'), hash: res.hash}, req, ws);
+    }
+
+    async getTileHome(req, ws) {
+        const result = await this.webWorker.getTileHome(req.seed);
+
+        this.send(result, req, ws);
+    }
+
+    async getTileSection(req, ws) {
+        if (!req.type)
+            throw new Error(`type is empty`);
+        if (!req.value)
+            throw new Error(`value is empty`);
+
+        const result = await this.webWorker.getTileSection(req);
+
+        this.send(result, req, ws);
+    }
+
+    async getTileBook(req, ws) {
+        if (!utils.hasProp(req, 'bookUid'))
+            throw new Error(`bookUid is empty`);
+
+        const result = await this.webWorker.getTileBook(req.bookUid);
+
+        this.send(result, req, ws);
+    }
+
+    async getCovers(req, ws) {
+        if (!req.bookUids || !req.bookUids.length)
+            throw new Error(`bookUids is empty`);
+        if (req.bookUids.length > 1000)
+            throw new Error(`too many bookUids`);
+
+        const covers = await this.webWorker.getBookCovers(req.bookUids);
+
+        this.send({covers}, req, ws);
     }
 
 }

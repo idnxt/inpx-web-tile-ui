@@ -633,6 +633,52 @@ class DbSearcher {
         }
     }
 
+    filterBySearch(bookField, searchValue) {
+        const db = this.db;
+
+        searchValue = searchValue.toLowerCase();
+        //особая обработка префиксов
+        if (searchValue === emptyFieldValue) {
+            return `(row.${bookField} === '' || row.${bookField}.indexOf(${db.esc(emptyFieldValue)}) === 0)`;
+        } else if (searchValue[0] === '=') {
+
+            searchValue = searchValue.substring(1);
+            return `(row.${bookField}.toLowerCase().localeCompare(${db.esc(searchValue)}) === 0)`;
+        } else if (searchValue[0] === '%') {
+            searchValue = searchValue.substring(1);
+            const ands = [];
+            const words = searchValue.split(' ').filter(a => a);
+            if (!words.length)
+                words.push('');
+
+            for (const w of words)
+                ands.push(`row.${bookField}.toLowerCase().indexOf(${db.esc(w)}) >= 0`);
+
+            return `(row.${bookField} && (${ands.join('&&')}))`;
+        } else if (searchValue[0] === '*') {
+
+            searchValue = searchValue.substring(1);
+            return `(row.${bookField} && row.${bookField}.toLowerCase().indexOf(${db.esc(searchValue)}) >= 0)`;
+        } else if (searchValue[0] === '#') {
+
+            searchValue = searchValue.substring(1);
+            return `(row.${bookField} === '' || (!enru.has(row.${bookField}.toLowerCase()[0]) && row.${bookField}.toLowerCase().indexOf(${db.esc(searchValue)}) >= 0))`;
+        } else if (searchValue[0] === '~') {//RegExp
+            searchValue = searchValue.substring(1);
+
+            return `
+                (() => {
+                    const re = new RegExp(${db.esc(searchValue)}, 'i');
+                    return re.test(row.${bookField});
+                })()
+            `;
+        } else {
+
+            return `(row.${bookField}.toLowerCase().localeCompare(${db.esc(searchValue)}) >= 0 ` +
+                `&& row.${bookField}.toLowerCase().localeCompare(${db.esc(searchValue)} + ${db.esc(maxUtf8Char)}) <= 0)`;
+        }
+    }
+
     async bookSearchIds(query) {
         const queryKey = this.queryKey(query);
         const bookKey = `book-search-ids-${queryKey}`;
@@ -640,56 +686,13 @@ class DbSearcher {
 
         if (bookIds === null) {
             const db = this.db;
-            const filterBySearch = (bookField, searchValue) => {
-                searchValue = searchValue.toLowerCase();
-                //особая обработка префиксов
-                if (searchValue === emptyFieldValue) {
-                    return `(row.${bookField} === '' || row.${bookField}.indexOf(${db.esc(emptyFieldValue)}) === 0)`;
-                } else if (searchValue[0] === '=') {
-
-                    searchValue = searchValue.substring(1);
-                    return `(row.${bookField}.toLowerCase().localeCompare(${db.esc(searchValue)}) === 0)`;
-                } else if (searchValue[0] === '%') {
-                    searchValue = searchValue.substring(1);
-                    const ands = [];
-                    const words = searchValue.split(' ').filter(a => a);
-                    if (!words.length)
-                        words.push('');
-
-                    for (const w of words)
-                        ands.push(`row.${bookField}.toLowerCase().indexOf(${db.esc(w)}) >= 0`);
-
-                    return `(row.${bookField} && (${ands.join('&&')}))`;
-                } else if (searchValue[0] === '*') {
-
-                    searchValue = searchValue.substring(1);
-                    return `(row.${bookField} && row.${bookField}.toLowerCase().indexOf(${db.esc(searchValue)}) >= 0)`;
-                } else if (searchValue[0] === '#') {
-
-                    searchValue = searchValue.substring(1);
-                    return `(row.${bookField} === '' || (!enru.has(row.${bookField}.toLowerCase()[0]) && row.${bookField}.toLowerCase().indexOf(${db.esc(searchValue)}) >= 0))`;
-                } else if (searchValue[0] === '~') {//RegExp
-                    searchValue = searchValue.substring(1);
-
-                    return `
-                        (() => {
-                            const re = new RegExp(${db.esc(searchValue)}, 'i');
-                            return re.test(row.${bookField});
-                        })()
-                    `;
-                } else {
-
-                    return `(row.${bookField}.toLowerCase().localeCompare(${db.esc(searchValue)}) >= 0 ` +
-                        `&& row.${bookField}.toLowerCase().localeCompare(${db.esc(searchValue)} + ${db.esc(maxUtf8Char)}) <= 0)`;
-                }
-            };
 
             const checks = ['true'];
             for (const f of this.recStruct) {
                 if (query[f.field]) {
                     let searchValue = query[f.field];
                     if (f.type === 'S') {
-                        checks.push(filterBySearch(f.field, searchValue));
+                        checks.push(this.filterBySearch(f.field, searchValue));
                     } if (f.type === 'N') {
                         const v = searchValue.split('..');
 
@@ -786,6 +789,103 @@ class DbSearcher {
         } finally {
             this.searchFlag--;
         }
+    }
+
+    //поиск по пользовательским полям с OR (для единой строки поиска tile-интерфейса)
+    async bookSearchAny(query) {
+        if (this.closed)
+            throw new Error('DbSearcher closed');
+
+        this.searchFlag++;
+
+        try {
+            const db = this.db;
+
+            const ids = await this.bookSearchAnyIds(query);
+
+            const totalFound = ids.length;
+            let limit = (query.limit ? query.limit : 100);
+            limit = (limit > maxLimit ? maxLimit : limit);
+            const offset = (query.offset ? query.offset : 0);
+
+            const slice = ids.slice(offset, offset + limit);
+
+            const found = await db.select({
+                table: 'book',
+                where: `@@id(${db.esc(Array.from(slice))})`
+            });
+
+            return {found, totalFound};
+        } finally {
+            this.searchFlag--;
+        }
+    }
+
+    async bookSearchAnyIds(query) {
+        const q = String(query.q || '').trim();
+        if (!q)
+            return new Uint32Array();
+
+        const key = `book-search-any-${JSON.stringify(q)}`;
+        let bookIds = await this.getCached(key);
+
+        if (bookIds === null) {
+            const db = this.db;
+
+            //для единой строки поиска используем поиск подстроки, если пользователь не указал специальный префикс сам
+            const specialPrefix = new Set(['=', '%', '*', '#', '~', '?']);
+            const searchValue = (specialPrefix.has(q[0]) ? q : ('*' + q));
+
+            const fields = ['author', 'genre', 'title', 'series', 'lang', 'date', 'ext', 'keywords', 'year'];
+            const ands = [];
+            for (const f of fields)
+                ands.push(this.filterBySearch(f, searchValue));
+
+            const rate = parseInt(q, 10);
+            if (!isNaN(rate) && rate >= 0 && rate <= 10)
+                ands.push(`row.librate === ${rate}`);
+
+            const rows = await db.select({
+                table: 'book',
+                rawResult: true,
+                where: `
+                    const enru = new Set(${db.esc(enruArr)});
+
+                    const checkBook = (row) => {
+                        if (row.del)
+                            return false;
+                        return ${ands.join(' || ')};
+                    };
+
+                    const result = [];
+                    for (const id of @all()) {
+                        const row = @unsafeRow(id);
+                        if (checkBook(row))
+                            result.push(row);
+                    }
+
+                    result.sort((a, b) => {
+                        let cmp = a.author.localeCompare(b.author);
+                        if (cmp === 0 && (a.series || b.series)) {
+                            cmp = (a.series && b.series ? a.series.localeCompare(b.series) : (a.series ? -1 : 1));
+                        }
+                        if (cmp === 0)
+                            cmp = a.serno - b.serno;
+                        if (cmp === 0)
+                            cmp = a.title.localeCompare(b.title);
+
+                        return cmp;
+                    });
+
+                    return new Uint32Array(result.map(row => row.id));
+                `
+            });
+
+            bookIds = rows[0].rawResult;
+            await this.putCached(key, bookIds);
+        }
+
+        return bookIds;
     }
 
     async opdsQuery(from, query) {
@@ -973,6 +1073,163 @@ class DbSearcher {
         } finally {
             this.searchFlag--;
         }
+    }
+
+    //односекционный проход по таблице book: пулы для tile-интерфейса
+    //sections: [{values: [genreValue, ...]}, ...], years: [int, ...]
+    //возврат: {new: [row], top: [row], sections: [[row], ...], years: {y: [row]}, ratedIds: [id], ratedRates: [rate]}
+    async tilePools(sections, years) {
+        if (this.closed)
+            throw new Error('DbSearcher closed');
+
+        this.searchFlag++;
+
+        try {
+            const db = this.db;
+
+            const sectionOf = {};
+            for (let i = 0; i < sections.length; i++)
+                for (const g of sections[i].values)
+                    sectionOf[g] = i;
+
+            const rows = await db.select({
+                table: 'book',
+                rawResult: true,
+                where: `
+                    const sectionOf = ${db.esc(sectionOf)};
+                    const sectionsCount = ${sections.length};
+                    const yearSet = new Set(${db.esc(years)});
+                    const RING = 1000;
+
+                    const result = {sections: [], years: {}};
+                    for (let i = 0; i < sectionsCount; i++)
+                        result.sections.push([]);
+                    for (const y of yearSet)
+                        result.years[y] = [];
+                    result.rated = [];
+
+                    const ring = [];
+                    let ringPos = 0;
+
+                    const make = (id, row) => ({
+                        id,
+                        _uid: row._uid,
+                        title: row.title,
+                        author: row.author,
+                        genre: row.genre,
+                        series: row.series || '',
+                        serno: row.serno || 0,
+                        year: row.year || '',
+                        insno: row.insno || 0,
+                        librate: row.librate || 0,
+                    });
+
+                    for (const id of @all()) {
+                        const row = @unsafeRow(id);
+                        if (row.del)
+                            continue;
+
+                        const b = make(id, row);
+                        if (ring.length < RING)
+                            ring.push(b);
+                        else {
+                            ring[ringPos] = b;
+                            ringPos = (ringPos + 1) % RING;
+                        }
+
+                        if (!b.librate)
+                            continue;
+
+                        result.rated.push(b);
+
+                        if (b.genre) {
+                            const gs = b.genre.split(',');
+                            for (const g of gs) {
+                                const si = sectionOf[g];
+                                if (si !== undefined)
+                                    result.sections[si].push(b);
+                            }
+                        }
+
+                        const y = parseInt(b.year, 10);
+                        if (y && yearSet.has(y))
+                            result.years[y].push(b);
+                    }
+
+                    ring.sort((a, b) => b.insno - a.insno);
+                    result.new = ring;
+
+                    const cmp = (a, b) => (b.librate - a.librate) || (a.insno - b.insno);
+
+                    result.rated.sort(cmp);
+                    result.top = result.rated.slice(0, 1000);
+
+                    for (let i = 0; i < result.sections.length; i++) {
+                        result.sections[i].sort(cmp);
+                        result.sections[i] = result.sections[i].slice(0, 200);
+                    }
+
+                    for (const y of yearSet) {
+                        result.years[y].sort(cmp);
+                        result.years[y] = result.years[y].slice(0, 200);
+                    }
+
+                    result.ratedIds = result.rated.map(b => b.id);
+                    result.ratedRates = result.rated.map(b => b.librate);
+                    result.rated = null;
+
+                    return result;
+                `
+            });
+
+            return rows[0].rawResult;
+        } finally {
+            this.searchFlag--;
+        }
+    }
+
+    //иды книг по query, отсортированные: sort = 'new' (insno desc) | 'rate' (librate desc)
+    async sortedBookIds(query, sort) {
+        if (this.closed)
+            throw new Error('DbSearcher closed');
+
+        const db = this.db;
+        const queryKey = this.queryKey(query);
+        const key = `tile-sorted-ids-${sort}-${queryKey}`;
+        let ids = await this.getCached(key);
+
+        if (ids === null) {
+            const bookIds = await this.selectBookIds(query);
+            if (!bookIds || !bookIds.length) {
+                ids = new Uint32Array();
+            } else {
+                const rows = await db.select({
+                    table: 'book',
+                    rawResult: true,
+                    where: `
+                        const ids = ${db.esc(Array.from(bookIds))};
+                        const result = [];
+                        for (const id of ids) {
+                            const row = @unsafeRow(id);
+                            result.push([row.insno || 0, row.librate || 0, id]);
+                        }
+
+                        result.sort((a, b) => {
+                            ${sort === 'rate' ?
+                                'return (b[1] - a[1]) || (a[0] - b[0]);'
+                                : 'return (b[0] - a[0]) || (b[2] - a[2]);'}
+                        });
+
+                        return new Uint32Array(result.map(p => p[2]));
+                    `
+                });
+
+                ids = rows[0].rawResult;
+                await this.putCached(key, ids);
+            }
+        }
+
+        return ids;
     }
 
     // парсинг ratingCount: 'N' | 'N..' | '..M' | 'N..M' → {from, to} или null

@@ -237,7 +237,12 @@ async function main() {
     new WebSocketController(wss, webAccess, config);
 
     const WebWorker = require('./core/WebWorker');
-    const webWorker = new WebWorker(config);
+    const webWorker = new WebWorker(config);//singleton
+
+    //любой HTTP-запрос считается активностью
+    server.on('request', () => {
+        webWorker.noteActivity();
+    });
 
     const PluginManager = require('./core/PluginManager');
     const pluginManager = new PluginManager(config, webWorker);

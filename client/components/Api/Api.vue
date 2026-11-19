@@ -248,6 +248,10 @@ class Api {
         return await this.request({action: 'bookSearch', query}, 30);
     }
 
+    async bookSearchAny(q, limit = 100, offset = 0) {
+        return await this.request({action: 'bookSearchAny', query: {q, limit, offset}}, 30);
+    }
+
     async getAuthorBookList(authorId) {
         return await this.request({action: 'get-author-book-list', authorId});
     }
@@ -262,7 +266,23 @@ class Api {
 
     async getGenreTree() {
         return await this.request({action: 'get-genre-tree'});
-    }    
+    }
+
+    async getTileHome(seed) {
+        return await this.request({action: 'get-tile-home', seed}, 60);
+    }
+
+    async getTileSection(type, value, offset, limit, sort) {
+        return await this.request({action: 'get-tile-section', type, value, offset, limit, sort}, 60);
+    }
+
+    async getTileBook(bookUid) {
+        return await this.request({action: 'get-tile-book', bookUid}, 120);
+    }
+
+    async getBookCovers(bookUids) {
+        return await this.request({action: 'get-covers', bookUids}, 120);
+    }
 
     async getBookLink(bookUid) {
         return await this.request({action: 'get-book-link', bookUid}, 120);

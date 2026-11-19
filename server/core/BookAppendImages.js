@@ -2,29 +2,39 @@ const fs = require('fs-extra');
 const path = require('path');
 const seven7z = require('node-7z');
 const SevenZipHelper = require('./SevenZipHelper');
+const utils = require('./utils');
 const fb2AppendImages = require('./book/fb2AppendImages');
 const epubAppendImages = require('./book/epubAppendImages');
 
-// Извлечь fileName из 7z в tempDir. Возвращает {extractedPath, rawBuffer}.
+// Извлечь fileName из 7z в уникальный подкаталог tempDir. Возвращает {extractedPath, rawBuffer}.
 async function extractFrom7z(config, arhivePath, fileName) {
     const sevenZipPath = config.sevenZipPath || SevenZipHelper.getSevenZipPath();
     if (!sevenZipPath)
         throw new Error('7-Zip not found. Install it or specify "sevenZipPath" in config.json');
 
+    //уникальная папка: параллельное извлечение одного файла в один и тот же путь 7z запрещает ("Cannot delete output file")
+    const outDir = `${config.tempDir}/${utils.randomHexString(15)}`;
+
     return new Promise((resolve, reject) => {
-        const stream = seven7z.extractFull(arhivePath, config.tempDir, {
+        const stream = seven7z.extractFull(arhivePath, outDir, {
             $bin: sevenZipPath,
             $cherryPick: fileName,
             recursive: true,
         });
         stream.on('end', async () => {
             try {
-                const extractedPath = `${config.tempDir}/${fileName}`;
+                const extractedPath = `${outDir}/${fileName}`;
                 const rawBuffer = await fs.readFile(extractedPath);
                 resolve({extractedPath, rawBuffer});
-            } catch (err) { reject(err); }
+            } catch (err) {
+                await fs.remove(outDir).catch(() => {});
+                reject(err);
+            }
         });
-        stream.on('error', reject);
+        stream.on('error', async (err) => {
+            await fs.remove(outDir).catch(() => {});
+            reject(err);
+        });
     });
 }
 
@@ -48,7 +58,7 @@ async function BookAppendImages(config, libFolder, fileName, outFile) {
             // неизвестный/неподдерживаемый формат — отдаём как есть, без обогащения
         }
     } finally {
-        await fs.remove(extractedPath).catch(() => {});
+        await fs.remove(path.dirname(extractedPath)).catch(() => {});
     }
 }
 

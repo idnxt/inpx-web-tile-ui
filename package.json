@@ -13,7 +13,7 @@
     "test:all": "npm test && npm run test:plugins",
     "test:smoke": "node --test \"test/smoke/**/*.test.js\"",
     "test:watch": "node --require ./test/helpers/preload.js --test --watch \"test/unit/**/*.test.js\"",
-    "dev": "nodemon --inspect --ignore server/.inpx-web --ignore client --exec node --expose-gc server --lib-dir=server/.inpx-web/lib",
+    "dev": "nodemon --inspect --ignore server/.inpx-web --ignore client --exec node --expose-gc server",
     "build:client": "webpack --config build/webpack.prod.config.js",
     "build:bundle": "node -e \"require('fs').rmSync('dist/bundle', {recursive: true, force: true})\" && esbuild server/index.js --bundle --platform=node --format=cjs --external:jembadb --external:@napi-rs/image --external:@napi-rs/image-* --outfile=dist/bundle/index.js",
     "build:linux": "npm run build:client && node build/prepkg.js linux && node build/fetch-napi.js node22-linux-x64 && npm run build:bundle && node build/pkg-with-conditional.js node22-linux-x64 dist/linux/inpx-web dist/bundle/index.js",

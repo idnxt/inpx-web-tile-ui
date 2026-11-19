@@ -34,6 +34,8 @@ const propsToSave = [
     'queryCacheDiskSize',
     'cacheCleanInterval',
     'inpxCheckInterval',
+    'idleReleaseInterval',
+    'idleExit',
     'lowMemoryMode',
     'fullOptimization',
     'reviewsEnabled',

@@ -48,6 +48,8 @@ module.exports = {
     queryCacheDiskSize: 500,
     cacheCleanInterval: 60,//minutes
     inpxCheckInterval: 60,//minutes
+    idleReleaseInterval: 10*60*1000,//авто-выгрузка памяти при простое (мс), 0 — выключено
+    idleExit: false,              // true — при простое завершать процесс целиком (только под watchdog)
     lowMemoryMode: false,
     fullOptimization: false,
     reviewsEnabled: true,   // включает показ рецензий, добавляет вкладку рецензий и ссылку на рецензии в OPDS карточку книги

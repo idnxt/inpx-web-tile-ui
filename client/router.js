@@ -2,6 +2,10 @@ import { createRouter, createWebHashHistory } from 'vue-router';
 import _ from 'lodash';
 
 const Search = () => import('./components/Search/Search.vue');
+const TileHome = () => import('./components/Tile/TileHome.vue');
+const TileSection = () => import('./components/Tile/TileSection.vue');
+const TileBook = () => import('./components/Tile/TileBook.vue');
+const TileSearch = () => import('./components/Tile/TileSearch.vue');
 
 const myRoutes = [
     ['/', Search],
@@ -10,6 +14,10 @@ const myRoutes = [
     ['/title', Search],
     ['/favorites', Search],
     ['/extended', Search],
+    ['/tile', TileHome],
+    ['/tile/search', TileSearch],
+    ['/tile/section/:type/:value', TileSection],
+    ['/tile/book/:uid', TileBook],
     ['/:pathMatch(.*)*', null, null, '/'],
 ];
 

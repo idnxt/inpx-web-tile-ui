@@ -102,7 +102,7 @@
                                 <div v-for="(author, i) in authors" :key="i" class="q-pa-sm" style="border-top: 1px solid #eee">
                                     <div class="row items-start no-wrap">
                                         <img
-                                            v-if="author.found"
+                                            v-if="author.found && author.hasPhoto !== false"
                                             :src="authorPhotoUrl(author.hash)"
                                             class="q-mr-sm"
                                             style="width: 80px; height: 80px; object-fit: cover"
@@ -487,16 +487,18 @@ class BookInfoDialog {
             // догружаем биографии последовательно
             const result = [];
             for (const a of list) {
-                let bio = null;
-                if (a.found) {
-                    try {
-                        const bioRes = await this.api.getAuthorBio(a.hash);
-                        bio = bioRes.bio;
-                    } catch (e) {
-                        bio = null;
+                    let bio = null;
+                    let hasPhoto;
+                    if (a.found) {
+                        try {
+                            const bioRes = await this.api.getAuthorBio(a.hash);
+                            bio = bioRes.bio;
+                            hasPhoto = bioRes.hasPhoto;
+                        } catch (e) {
+                            bio = null;
+                        }
                     }
-                }
-                result.push(Object.assign({}, a, {bio}));
+                    result.push(Object.assign({}, a, {bio, hasPhoto}));
             }
 
             this.authors = result;

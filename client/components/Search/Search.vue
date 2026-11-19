@@ -55,6 +55,13 @@
                                         </q-tooltip>
                                     </template>
                                 </DivBtn>
+                                <DivBtn class="q-ml-sm text-grey-7 bg-cyan-1" :size="28" :icon-size="24" icon="la la-th" round @click.stop.prevent="openTileUi">
+                                    <template #tooltip>
+                                        <q-tooltip :delay="1500" anchor="bottom middle" content-style="font-size: 80%" max-width="400px">
+                                            Плиточный интерфейс
+                                        </q-tooltip>
+                                    </template>
+                                </DivBtn>
                             </div>
                         </div>
                         <div v-show="!isExtendedSearch" class="row q-mx-sm q-mb-xs items-center" style="max-width: 1024px">
@@ -862,6 +869,10 @@ class Search {
     openReleasePage() {
         if (this.config.latestReleaseLink)
             window.open(this.config.latestReleaseLink, '_blank');
+    }
+
+    openTileUi() {
+        this.$router.push('/tile');
     }
 
     makeProjectName() {
