@@ -26,6 +26,6 @@ test('reviewsInOpds удалён (регресс-защита)', () => {
 });
 
 test('latestReleaseLink/checkReleaseLink — указывают на форк (снапшот)', () => {
-    assert.strictEqual(base.latestReleaseLink, 'https://github.com/00svd00/inpx-web/releases/latest');
-    assert.strictEqual(base.checkReleaseLink, 'https://api.github.com/repos/00svd00/inpx-web/releases/latest');
+    assert.strictEqual(base.latestReleaseLink, 'https://github.com/idnxt/inpx-web-tile-ui/releases/latest');
+    assert.strictEqual(base.checkReleaseLink, 'https://api.github.com/repos/idnxt/inpx-web-tile-ui/releases/latest');
 });

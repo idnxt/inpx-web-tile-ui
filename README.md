@@ -325,11 +325,11 @@ Options:
     },
 
     // страница для скачивания свежего релиза
-    "latestReleaseLink": "https://github.com/00svd00/inpx-web/releases/latest",
+    "latestReleaseLink": "https://github.com/idnxt/inpx-web-tile-ui/releases/latest",
 
     // api для проверки новой версии, 
     // пустая строка - отключить проверку выхода новых версий
-    "checkReleaseLink": "https://api.github.com/repos/00svd00/inpx-web/releases/latest",
+    "checkReleaseLink": "https://api.github.com/repos/idnxt/inpx-web-tile-ui/releases/latest",
 
     // настройки по умолчанию для веб-интерфейса
     // устанавливаются при первой загрузке страницы в браузере
