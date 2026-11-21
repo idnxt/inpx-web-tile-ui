@@ -109,8 +109,9 @@
                         </div>
                     </template>
                 </div>
-
-                <div v-if="annotation" class="tile-annotation q-mt-lg" v-html="annotation" />
+            </div>
+            <div class="tile-book-bottom">
+                <div v-if="annotation" class="tile-annotation" v-html="annotation" />
 
                 <div v-if="infoList.length" class="q-mt-md">
                     <div v-for="item in infoList" :key="item.name" class="tile-info-block">
@@ -602,9 +603,19 @@ a.tile-unset-link:hover {
 
 .tile-book {
     display: flex;
+    flex-wrap: wrap;
     gap: 20px;
     padding: 20px 24px;
     align-items: flex-start;
+}
+
+.tile-book > .col {
+    min-width: 0;
+}
+
+.tile-book-bottom {
+    flex: 1 1 100%;
+    min-width: 0;
 }
 
 .tile-book-left {
@@ -797,5 +808,25 @@ a.tile-series-book:hover {
 
 .tile-review-text ::v-deep p {
     margin: 0 0 6px 0;
+}
+
+@media (max-width: 640px) {
+    .tile-book {
+        padding: 12px;
+        gap: 12px;
+    }
+
+    .tile-book-left {
+        width: 180px;
+    }
+
+    .tile-cover-big {
+        width: 180px;
+        height: 240px;
+    }
+
+    .tile-series-books {
+        width: 180px;
+    }
 }
 </style>

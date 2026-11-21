@@ -1,6 +1,6 @@
 <template>
     <div class="reader-root" :class="'theme-' + theme"
-        @mousemove="onUiActivity" @mouseleave="hideUiNow">
+        @pointermove="onUiActivity" @mouseleave="hideUiNow">
         <div class="reader-hud-top" :class="{off: !uiVisible}">
             <div class="reader-topbar">
                 <a class="reader-back" :href="`#/tile/book/${encodeURIComponent(uid)}`">
@@ -214,11 +214,22 @@ class TileReader {
         this.load();
     }
 
+    activated() {
+        //читалка занимает весь экран: документ не должен прокручиваться,
+        //чтобы браузер не сворачивал/разворачивал адресную строку
+        document.body.classList.add('reader-lock-scroll');
+    }
+
+    deactivated() {
+        document.body.classList.remove('reader-lock-scroll');
+    }
+
     beforeRouteLeave() {
         this.flushProgress();
     }
 
     beforeUnmount() {
+        document.body.classList.remove('reader-lock-scroll');
         window.removeEventListener('pagehide', this.onPageHide);
         document.removeEventListener('visibilitychange', this.onVisChange);
         window.removeEventListener('keydown', this.onKeydown);
@@ -304,9 +315,10 @@ class TileReader {
     }
 
     //---авто-скрытие интерфейса---------------------------------------------------
-    //интерфейс показывается ТОЛЬКО при движении мыши
-    //и при прокрутке вниз на тач-устройствах;
-    //прокрутка колесом и клавиатура показ не запускают
+    //на десктопе интерфейс показывается при движении указателя;
+    //на тач-устройствах прокрутка вниз показывает интерфейс,
+    //прокрутка вверх — прячет (см. onScrollContent);
+    //тап, свайп, колесо и клавиатура показ не запускают
 
     showUi() {
         this.uiVisible = true;
@@ -324,7 +336,11 @@ class TileReader {
             this.uiVisible = false;
     }
 
-    onUiActivity() {
+    onUiActivity(e) {
+        //синтетические мышиные события после касания — не активность:
+        //на тач-устройствах показ меню ведёт onScrollContent
+        if (e && e.pointerType === 'touch')
+            return;
         if (!this.panelOpen)
             this.showUi();
     }
@@ -542,9 +558,15 @@ class TileReader {
         if (!el)
             return;
 
-        //на тач-устройствах показываем интерфейс при прокрутке вниз
-        if (this.touching && el.scrollTop > this.lastScrollTop)
-            this.showUi();
+        //на тач-устройствах: прокрутка вниз — показываем интерфейс,
+        //вверх — прячем (порог фильтрует инерционные отскоки)
+        if (this.touching) {
+            const delta = el.scrollTop - this.lastScrollTop;
+            if (delta > 0)
+                this.showUi();
+            else if (delta < -6)
+                this.hideUiNow();
+        }
         this.lastScrollTop = el.scrollTop;
 
         const now = Date.now();
@@ -876,6 +898,9 @@ export default vueComponent(TileReader);
     flex: 1;
     position: relative;
     overflow-y: auto;
+    /*внутренний скролл не передаётся документу, чтобы
+      браузер не менял состояние адресной строки при свайпах текста*/
+    overscroll-behavior: none;
     padding: 80px 16px 24px 16px;
     line-height: 1.65;
 }
@@ -1090,5 +1115,15 @@ export default vueComponent(TileReader);
 
 .rp-icon {
     font-size: 12px;
+}
+</style>
+
+<style>
+/*пока открыта читалка, документ не прокручивается:
+  внутренняя лента книги — единственный скролл, и адресная
+  строка браузера не реагирует на свайпы текста*/
+body.reader-lock-scroll,
+body.reader-lock-scroll #app {
+    overflow: hidden;
 }
 </style>
