@@ -47,7 +47,7 @@
         <div v-else-if="phase === 'ready' && book"
             ref="content"
             class="reader-content" :class="contentFontClass" :style="{fontSize: fontSize + 'px'}"
-            @scroll="onScrollContent" @click="onPageTap"
+            @click="onPageTap"
             @touchstart.passive="onTouchStart" @touchend="onTouchEnd">
             <div class="reader-content-inner">
                 <div v-for="(sec, i) in book.sections" :key="i" class="reader-section">
@@ -149,6 +149,9 @@ class TileReader {
     touching = false;
     touchEndTimer = null;
     lastScrollTop = 0;
+    pageJump = false; //программное листание страниц
+    pageJumpTimer = null;
+    active = false; //keep-alive: компонент сейчас на экране
 
     scrollSaveTimer = null;
     lastOffsetUpdate = 0;
@@ -211,7 +214,34 @@ class TileReader {
         document.addEventListener('visibilitychange', this.onVisChange);
         window.addEventListener('keydown', this.onKeydown);
         window.addEventListener('resize', this.onResize);
+        //скроллится сам документ: слушаем окно, а не внутреннюю полосу
+        window.addEventListener('scroll', this.onDocScroll, {passive: true});
         this.load();
+    }
+
+    activated() {
+        this.active = true;
+        //читалка переводит приложение в режим документного скролла
+        document.documentElement.classList.add('inpx-reader-doc');
+        if (this.phase === 'ready') {
+            this.lastScrollTop = this.docScrollY();
+            this.$nextTick(() => {
+                this.computeMetrics();
+                this.restoreScroll();
+                this.showUi();
+            });
+        }
+    }
+
+    deactivated() {
+        this.active = false;
+        this.clearHideTimer();
+        if (this.touchEndTimer) {
+            clearTimeout(this.touchEndTimer);
+            this.touchEndTimer = null;
+        }
+        this.uiVisible = false;
+        document.documentElement.classList.remove('inpx-reader-doc');
     }
 
     beforeRouteLeave() {
@@ -223,6 +253,8 @@ class TileReader {
         document.removeEventListener('visibilitychange', this.onVisChange);
         window.removeEventListener('keydown', this.onKeydown);
         window.removeEventListener('resize', this.onResize);
+        window.removeEventListener('scroll', this.onDocScroll);
+        document.documentElement.classList.remove('inpx-reader-doc');
         this.clearScrollTimer();
         this.clearHideTimer();
         this.flushProgress();
@@ -305,8 +337,9 @@ class TileReader {
 
     //---авто-скрытие интерфейса---------------------------------------------------
     //на десктопе интерфейс показывается при движении указателя;
-    //на тач-устройствах прокрутка вниз показывает интерфейс,
-    //прокрутка вверх — прячет (см. onScrollContent);
+    //на тач-устройствах прокрутка «вниз» (к началу книги) показывает
+    //интерфейс, чтение (контент вверх) — прячет, а листание страниц
+    //строку не трогает вовсе (см. onDocScroll);
     //тап, свайп, колесо и клавиатура показ не запускают
 
     showUi() {
@@ -327,7 +360,7 @@ class TileReader {
 
     onUiActivity(e) {
         //синтетические мышиные события после касания — не активность:
-        //на тач-устройствах показ меню ведёт onScrollContent
+        //на тач-устройствах показ меню ведёт onDocScroll
         if (e && e.pointerType === 'touch')
             return;
         if (!this.panelOpen)
@@ -363,7 +396,7 @@ class TileReader {
         this.offsetFrac = 0;
         this.sectionTops = [];
         this.sectionHeights = [];
-        this.lastScrollTop = 0;
+        this.lastScrollTop = this.docScrollY();
         this.downloadLoaded = 0;
         this.downloadTotal = 0;
 
@@ -488,9 +521,9 @@ class TileReader {
         }
     }
 
-    scrollAnchor() {
-        const el = this.$refs.content;
-        return (el ? el.clientHeight * 0.3 : 0);
+    //текущая позиция скролла документа
+    docScrollY() {
+        return window.scrollY || document.documentElement.scrollTop || 0;
     }
 
     restoreScroll() {
@@ -498,8 +531,15 @@ class TileReader {
         if (!el || !this.sectionTops.length)
             return;
         const i = Math.max(0, Math.min(this.sectionTops.length - 1, this.sectionIndex));
-        const y = this.sectionTops[i] + (this.offsetFrac || 0) * (this.sectionHeights[i] || 0) - this.scrollAnchor();
-        el.scrollTop = Math.max(0, y);
+        //цель в координатах документа: верх полосы + раздел + смещение в нём
+        //минус точка чтения (30% высоты вьюпорта)
+        const contentTop = el.getBoundingClientRect().top + this.docScrollY();
+        const target = contentTop + this.sectionTops[i]
+            + (this.offsetFrac || 0) * (this.sectionHeights[i] || 0)
+            - window.innerHeight * 0.3;
+        this.markPageJump();
+        window.scrollTo(0, Math.max(0, target));
+        this.lastScrollTop = this.docScrollY();
     }
 
     makeProgress() {
@@ -542,34 +582,41 @@ class TileReader {
         }
     }
 
-    onScrollContent() {
+    //прокрутка самого документа (полоса текста уже не скроллится отдельно)
+    onDocScroll() {
+        if (!this.active || this.phase !== 'ready')
+            return;
         const el = this.$refs.content;
         if (!el)
             return;
 
-        //на тач-устройствах: прокрутка вниз — показываем интерфейс,
-        //вверх — прячем (порог фильтрует инерционные отскоки)
-        if (this.touching) {
-            const delta = el.scrollTop - this.lastScrollTop;
-            if (delta > 0)
+        const y = this.docScrollY();
+
+        //на тач-устройствах: прокрутка «вниз» (к началу книги, контент идёт
+        //вниз) показывает интерфейс, чтение (контент вверх) — прячет;
+        //при листании страниц строка не меняется вовсе
+        if (this.touching && !this.pageJump) {
+            const delta = y - this.lastScrollTop;
+            if (delta < -6)
                 this.showUi();
-            else if (delta < -6)
+            else if (delta > 6)
                 this.hideUiNow();
         }
-        this.lastScrollTop = el.scrollTop;
+        this.lastScrollTop = y;
 
         const now = Date.now();
         if (now - this.lastOffsetUpdate > 200) {
             this.lastOffsetUpdate = now;
-            //текущий раздел — тот, что содержит точку 30% высоты вьюпорта
-            const y = el.scrollTop + el.clientHeight * 0.3;
+            //текущий раздел — тот, что содержит точку чтения:
+            //30% высоты вьюпорта в координатах полосы текста
+            const y0 = window.innerHeight * 0.3 - el.getBoundingClientRect().top;
             let i = 0;
             for (let k = 0; k < this.sectionTops.length; k++)
-                if (y >= this.sectionTops[k])
+                if (y0 >= this.sectionTops[k])
                     i = k;
             this.sectionIndex = i;
             const h = this.sectionHeights[i] || 1;
-            this.offsetFrac = Math.max(0, Math.min(1, (y - this.sectionTops[i]) / h));
+            this.offsetFrac = Math.max(0, Math.min(1, (y0 - this.sectionTops[i]) / h));
         }
 
         if (!this.scrollSaveTimer)
@@ -579,34 +626,44 @@ class TileReader {
             }, 2000);
     }
 
+    //помечаем программное листание: его прыжок тоже вызывает событие
+    //скролла, но интерфейс при нём трогать не положено
+    markPageJump() {
+        this.pageJump = true;
+        if (this.pageJumpTimer)
+            clearTimeout(this.pageJumpTimer);
+        this.pageJumpTimer = setTimeout(() => {
+            this.pageJumpTimer = null;
+            this.pageJump = false;
+        }, 350);
+    }
+
     //---ввод: клавиши, тапы, свайпы---------------------------------------------
     //«страница» = один экран (вьюпорт), строка — высота строки текста
 
     movePage(d) {
-        const el = this.$refs.content;
-        if (!el)
+        if (this.phase !== 'ready')
             return;
-        const ph = el.clientHeight;
+        const ph = window.innerHeight;
         if (!ph)
             return;
-        const max = Math.max(0, el.scrollHeight - ph);
-        const cur = el.scrollTop;
+        const max = Math.max(0, document.documentElement.scrollHeight - ph);
+        const cur = this.docScrollY();
         //в режиме листания прыгаем на границу ближайшей страницы,
         //в прокрутке — на полный экран от текущей позиции
         const target = (this.mode === 'page')
             ? (Math.round(cur / ph) + d) * ph
             : cur + d * ph;
-        el.scrollTop = Math.max(0, Math.min(max, target));
+        this.markPageJump();
+        window.scrollTo(0, Math.max(0, Math.min(max, target)));
     }
 
     moveLine(d) {
         const el = this.$refs.content;
-        if (!el)
-            return;
-        const lh = parseFloat(getComputedStyle(el).lineHeight);
+        const lh = (el ? parseFloat(getComputedStyle(el).lineHeight) : 0);
         const step = (isFinite(lh) && lh > 0) ? lh : this.fontSize * 1.65;
-        const max = Math.max(0, el.scrollHeight - el.clientHeight);
-        el.scrollTop = Math.max(0, Math.min(max, el.scrollTop + d * step));
+        const max = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+        window.scrollTo(0, Math.max(0, Math.min(max, this.docScrollY() + d * step)));
     }
 
     onKeydown(e) {
@@ -754,15 +811,11 @@ export default vueComponent(TileReader);
 </script>
 
 <style scoped>
+/*корень читалки лежит в потоке документа: именно документ
+  скроллится, а не внутренняя полоса текста — иначе мобильный
+  браузер не меняет состояние адресной строки*/
 .reader-root {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
+    min-height: 100vh;
     background: var(--r-bg);
     color: var(--r-text);
     font-family: 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
@@ -797,9 +850,10 @@ export default vueComponent(TileReader);
     --r-soft: #eaddbe;
 }
 
-/*верхний HUD: верхняя панель + линия прогресса, показывается только при движении мыши*/
+/*верхний HUD: верхняя панель + линия прогресса, прижат к верху вьюпорта
+  и лежит поверх прокручиваемого документа*/
 .reader-hud-top {
-    position: absolute;
+    position: fixed;
     top: 0;
     left: 0;
     right: 0;
@@ -882,14 +936,9 @@ export default vueComponent(TileReader);
     transition: width 0.2s linear;
 }
 
-/*текст книги: отступ сверху под HUD*/
+/*текст книги: отступ сверху под HUD; скроллится документ, а не полоса*/
 .reader-content {
-    flex: 1;
     position: relative;
-    overflow-y: auto;
-    /*внутренний скролл не передаётся документу, чтобы
-      браузер не менял состояние адресной строки при свайпах текста*/
-    overscroll-behavior: none;
     padding: 80px 16px 24px 16px;
     line-height: 1.65;
 }
@@ -962,7 +1011,7 @@ export default vueComponent(TileReader);
 }
 
 .reader-status {
-    flex: 1;
+    min-height: 100vh;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -1000,9 +1049,9 @@ export default vueComponent(TileReader);
     text-decoration: underline;
 }
 
-/*панель настроек: шторка снизу*/
+/*панель настроек: шторка снизу, прижата к вьюпорту*/
 .reader-panel-backdrop {
-    position: absolute;
+    position: fixed;
     top: 0;
     left: 0;
     right: 0;
@@ -1012,7 +1061,7 @@ export default vueComponent(TileReader);
 }
 
 .reader-panel {
-    position: absolute;
+    position: fixed;
     left: 0;
     right: 0;
     bottom: 0;
@@ -1104,5 +1153,25 @@ export default vueComponent(TileReader);
 
 .rp-icon {
     font-size: 12px;
+}
+</style>
+
+<style>
+/*читалка лежит в потоке документа: пока активен маршрут читалки,
+  снимаем фиксированные высоты контейнеров приложения — именно тогда
+  документ прокручивается, и мобильный браузер нативно прячет
+  адресную строку при чтении и открывает её при прокрутке «вниз»*/
+html.inpx-reader-doc,
+html.inpx-reader-doc body,
+html.inpx-reader-doc #app {
+    height: auto !important;
+}
+
+html.inpx-reader-doc .fit {
+    height: auto !important;
+}
+
+html.inpx-reader-doc {
+    overscroll-behavior: none;
 }
 </style>
