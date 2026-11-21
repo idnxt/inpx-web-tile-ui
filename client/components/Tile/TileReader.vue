@@ -941,6 +941,11 @@ export default vueComponent(TileReader);
     position: relative;
     padding: 80px 16px 24px 16px;
     line-height: 1.65;
+    /*отключаем выбор по одиночному тапу (с вызовом меню поиска
+      на iOS/Android); выделение по двум тапам и удержанию
+      остаётся — браузер разрешает override по user-select*/
+    -webkit-user-select: none;
+    user-select: none;
 }
 
 .reader-content-serif {
