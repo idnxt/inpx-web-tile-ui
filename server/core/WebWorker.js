@@ -630,7 +630,7 @@ class WebWorker {
 
         const pools = await this.dbSearcher.tilePools(sections, years);
 
-        //топ-200 авторов по средней оценке (только оцененные книги)
+        //топ-200 авторов по средней оценке (только оценённые книги)
         const idMap = this.dbSearcher.bookIdMap['author'];
         const agg = new Map();
         const ratedIds = pools.ratedIds;
@@ -1335,7 +1335,7 @@ class WebWorker {
                             result[book._uid] = link;
                     }
                 } catch (e) {
-                    //битый архив обложек — пропускаем
+                    //повреждённый архив обложек — пропускаем
                     log(LM_ERR, `getBookCovers error: ${e.message}`);
                 } finally {
                     try { await zipReader.close(); } catch (e) {}

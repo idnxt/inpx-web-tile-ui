@@ -54,7 +54,7 @@ test('getTileReadList: по убыванию времени, readTime, неиз�
         assert.strictEqual(res2.total, 3);
         assert.deepStrictEqual(res2.books.map((b) => b._uid), ['uid-a']);
 
-        //битый профиль
+        //повреждённый профиль
         await assert.rejects(() => WebWorker.prototype.getTileReadList.call(fake, '../x'), /invalid/);
 
         //профиль без файла -> пусто

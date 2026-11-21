@@ -19,7 +19,7 @@
                     <input
                         v-model="profileInput"
                         class="tile-set-input"
-                        placeholder="имя профиля (текст или цифры)"
+                        placeholder="имя профиля (латиница, цифры, точки, _ и -)"
                     />
                     <DivBtn class="q-ml-sm" size="28" :disabled="!profileInput || switching" @meClick="setProfile">
                         {{ profile ? 'Сменить' : 'Задать' }}
@@ -260,7 +260,7 @@ class TileSettings {
             const res = await this.api.getUserData(this.profile);
             this.data = (res.data || null);
         } catch (e) {
-            //битый/пустой профиль не критичен
+            //повреждённый/пустой профиль — не критично
         }
     }
 

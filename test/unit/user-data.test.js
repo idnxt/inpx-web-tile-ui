@@ -26,7 +26,7 @@ test('validProfile: допустимые и запрещённые имена', 
     assert.ok(!UserData.validProfile('x'.repeat(33)));
 });
 
-test('оценка: поставить/перепоставить/снять/зажать в 0..5', async () => {
+test('оценка: поставить/перепоставить/снять, ограничение диапазоном 0..5', async () => {
     const dir = await makeTmpDir();
     try {
         resetSingletons();
@@ -35,7 +35,7 @@ test('оценка: поставить/перепоставить/снять/з�
         assert.deepStrictEqual(await user.setRating('p1', 'uid-a', 4), {rating: 4});
         assert.deepStrictEqual(await user.setRating('p1', 'uid-a', 2), {rating: 2});
 
-        //больше 5 — зажать
+        //больше 5 — ограничить до 5
         assert.deepStrictEqual(await user.setRating('p1', 'uid-b', 9), {rating: 5});
 
         //0 — снять
@@ -86,7 +86,7 @@ test('прочитано: отметить и снять', async () => {
     } finally { await cleanup(dir); resetSingletons(); }
 });
 
-test('прогресс чтения: сохранить/перезаписать/зажать значения', async () => {
+test('прогресс чтения: сохранить/перезаписать, ограничение значений', async () => {
     const dir = await makeTmpDir();
     try {
         resetSingletons();
@@ -106,12 +106,12 @@ test('прогресс чтения: сохранить/перезаписать
         d = await user.getData('p1');
         assert.strictEqual(d.progress['uid-a'].section, 20);
 
-        //зажать: section < 1, frac вне 0..1, битый total
+        //ограничение: section < 1, frac вне 0..1; повреждённый total
         await user.setProgress('p1', 'uid-b', {section: -5, total: 50, frac: 9});
         d = await user.getData('p1');
         assert.deepStrictEqual(d.progress['uid-b'], {section: 1, total: 50, frac: 1, time: d.progress['uid-b'].time});
 
-        //битые значения — значения по умолчанию
+        //повреждённые значения — значения по умолчанию
         await user.setProgress('p1', 'uid-c', {section: 'x', total: 'y'});
         d = await user.getData('p1');
         assert.strictEqual(d.progress['uid-c'].section, 1);
@@ -265,7 +265,7 @@ test('скрытие прочитанных/оценённых: переключ
     } finally { await cleanup(dir); resetSingletons(); }
 });
 
-test('скрытие: битый файл не ломает normalize', async () => {
+test('скрытие: повреждённый файл не ломает normalize', async () => {
     const dir = await makeTmpDir();
     try {
         resetSingletons();
@@ -279,7 +279,7 @@ test('скрытие: битый файл не ломает normalize', async ()
     } finally { await cleanup(dir); resetSingletons(); }
 });
 
-test('битый файл профиля -> пустые данные, не падает', async () => {
+test('повреждённый файл профиля -> пустые данные, не падает', async () => {
     const dir = await makeTmpDir();
     try {
         resetSingletons();
@@ -290,7 +290,7 @@ test('битый файл профиля -> пустые данные, не па
         const d = await user.getData('bad');
         assert.deepStrictEqual(d, user.emptyData());
 
-        //запись поверх битого файла восстанавливает профиль
+        //запись поверх повреждённого файла восстанавливает профиль
         await user.setRating('bad', 'uid-a', 5);
         const d2 = await user.getData('bad');
         assert.strictEqual(d2.ratings['uid-a'], 5);

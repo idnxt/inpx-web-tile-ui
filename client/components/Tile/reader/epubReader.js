@@ -1,6 +1,6 @@
 //Парсер EPUB в браузере (jszip) — читалка работает офлайн, без запросов к серверу.
 //Возвращает то же, что parseFb2: {title, author, sections, total, imageUrls}.
-//Поддерживает распространённый подмножество EPUB 2/3 (spine из html-документов).
+//Поддерживает распространённое подмножество EPUB 2/3 (spine из html-документов).
 
 import JSZip from 'jszip';
 
@@ -109,7 +109,7 @@ export async function parseEpub(buf) {
         throw new Error('Неверный EPUB: нет META-INF/container.xml');
     const cdoc = new DOMParser().parseFromString(await containerFile.async('string'), 'application/xml');
     if (cdoc.querySelector('parsererror'))
-        throw new Error('Неверный EPUB: битый container.xml');
+        throw new Error('Неверный EPUB: повреждённый container.xml');
     const rootfilePath = cdoc.querySelector('rootfile')?.getAttribute('full-path');
     if (!rootfilePath)
         throw new Error('Неверный EPUB: нет rootfile');
@@ -119,7 +119,7 @@ export async function parseEpub(buf) {
         throw new Error('Неверный EPUB: нет package-файла');
     const pdoc = new DOMParser().parseFromString(await packageFile.async('string'), 'application/xml');
     if (pdoc.querySelector('parsererror'))
-        throw new Error('Неверный EPUB: битый package.xml');
+        throw new Error('Неверный EPUB: повреждённый package.xml');
 
     const baseDir = rootfilePath.substring(0, rootfilePath.lastIndexOf('/') + 1);
     const resolvePath = (href) => {

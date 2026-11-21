@@ -55,7 +55,7 @@ class UserData {
         e.hideRead = !!d.hideRead;
         e.hideRated = !!d.hideRated;
 
-        //битые записи прогресса отбрасываем, валидные приводим к единому виду
+        //повреждённые записи прогресса отбрасываем, валидные приводим к единому виду
         if (d.progress && typeof d.progress === 'object') {
             for (const [uid, p] of Object.entries(d.progress)) {
                 const section = parseInt(p?.section, 10);
@@ -83,7 +83,7 @@ class UserData {
                 try {
                     d = this._normalize(JSON.parse(await fs.readFile(file, 'utf8')));
                 } catch (e) {
-                    //битый файл не должен ронять сервер, начинаем профиль заново
+                    //повреждённый файл не должен ронять сервер — начинаем профиль заново
                     d = this.emptyData();
                 }
             }
