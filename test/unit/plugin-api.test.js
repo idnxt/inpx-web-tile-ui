@@ -1,5 +1,6 @@
 const { test, describe } = require('node:test');
 const assert = require('node:assert');
+const path = require('path');
 
 const { PluginApi, API_VERSION, safeConfig } = require('../../server/core/PluginApi');
 
@@ -356,7 +357,7 @@ describe('PluginApi: pluginsDir', () => {
 
     test('пуст → path.join(dataDir, "plugins")', () => {
         const api = makeApi({ config: makeConfig({ pluginsDir: '', dataDir: '/data' }) });
-        assert.strictEqual(api.pluginsDir, '/data/plugins');
+        assert.strictEqual(api.pluginsDir, path.join('/data', 'plugins'));
     });
 });
 
