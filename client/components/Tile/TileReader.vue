@@ -214,22 +214,11 @@ class TileReader {
         this.load();
     }
 
-    activated() {
-        //читалка занимает весь экран: документ не должен прокручиваться,
-        //чтобы браузер не сворачивал/разворачивал адресную строку
-        document.body.classList.add('reader-lock-scroll');
-    }
-
-    deactivated() {
-        document.body.classList.remove('reader-lock-scroll');
-    }
-
     beforeRouteLeave() {
         this.flushProgress();
     }
 
     beforeUnmount() {
-        document.body.classList.remove('reader-lock-scroll');
         window.removeEventListener('pagehide', this.onPageHide);
         document.removeEventListener('visibilitychange', this.onVisChange);
         window.removeEventListener('keydown', this.onKeydown);
@@ -1115,15 +1104,5 @@ export default vueComponent(TileReader);
 
 .rp-icon {
     font-size: 12px;
-}
-</style>
-
-<style>
-/*пока открыта читалка, документ не прокручивается:
-  внутренняя лента книги — единственный скролл, и адресная
-  строка браузера не реагирует на свайпы текста*/
-body.reader-lock-scroll,
-body.reader-lock-scroll #app {
-    overflow: hidden;
 }
 </style>
