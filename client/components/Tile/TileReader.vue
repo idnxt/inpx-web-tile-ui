@@ -1,26 +1,27 @@
 <template>
-    <div class="reader-root">
-        <div class="reader-topbar">
-            <a class="reader-back" :href="`#/tile/book/${encodeURIComponent(uid)}`">
-                <i class="la la-arrow-left" />
-                <span>К книге</span>
-            </a>
-            <div class="col reader-title">
-                <div class="reader-title-name">{{ displayName }}</div>
-                <div v-if="displayAuthor" class="reader-title-author">{{ displayAuthor }}</div>
+    <div class="reader-root" :class="'theme-' + theme"
+        @mousemove="onUiActivity" @mouseleave="hideUiNow">
+        <div class="reader-hud-top" :class="{off: !uiVisible}">
+            <div class="reader-topbar">
+                <a class="reader-back" :href="`#/tile/book/${encodeURIComponent(uid)}`">
+                    <i class="la la-arrow-left" />
+                    <span>К книге</span>
+                </a>
+                <div class="col reader-title">
+                    <div class="reader-title-name">{{ displayName }}</div>
+                    <div v-if="displayAuthor" class="reader-title-author">{{ displayAuthor }}</div>
+                </div>
+                <div class="row items-center no-wrap">
+                    <DivBtn size="28" class="reader-font-btn" @meClick="changeFontSize(-1)">A−</DivBtn>
+                    <DivBtn size="28" class="reader-font-btn q-ml-xs" @meClick="changeFontSize(1)">A+</DivBtn>
+                    <DivBtn size="28" class="reader-font-btn q-ml-xs" icon="la la-cog" @meClick="openPanel" tooltip>
+                        <template #tooltip>Настройки читалки</template>
+                    </DivBtn>
+                </div>
             </div>
-            <div class="row items-center no-wrap">
-                <DivBtn size="28" class="reader-font-btn" @meClick="changeFontSize(-1)">A−</DivBtn>
-                <DivBtn size="28" class="reader-font-btn q-ml-xs" @meClick="changeFontSize(1)">A+</DivBtn>
-                <DivBtn size="28" class="reader-font-btn q-ml-xs" icon="la la-trash" @meClick="removeFromDevice"
-                    tooltip>
-                    <template #tooltip>Удалить книгу с устройства</template>
-                </DivBtn>
+            <div class="reader-progress-line">
+                <div class="reader-progress-fill" :style="{width: percent + '%'}" />
             </div>
-        </div>
-
-        <div class="reader-progress-line">
-            <div class="reader-progress-fill" :style="{width: percent + '%'}" />
         </div>
 
         <div v-if="phase === 'loading'" class="reader-status">
@@ -39,21 +40,75 @@
             </div>
         </div>
 
-        <template v-else-if="phase === 'ready' && currentSection">
-            <div ref="content" class="reader-content" :style="{fontSize: fontSize + 'px'}" @scroll="onScroll">
+        <template v-else-if="phase === 'ready' && book">
+            <!--режим прокрутки: все разделы одной лентой-->
+            <div v-if="mode === 'scroll'"
+                ref="contentScroll"
+                class="reader-content" :class="contentFontClass" :style="{fontSize: fontSize + 'px'}"
+                @scroll="onScrollContent" @click="onScrollTap"
+                @touchstart.passive="onTouchStart" @touchend="onTouchEnd">
                 <div class="reader-content-inner">
+                    <div v-for="(sec, i) in book.sections" :key="i" class="reader-section">
+                        <h2 v-if="sec.title" class="reader-section-title">{{ sec.title }}</h2>
+                        <div class="reader-section-html" v-html="sec.html" />
+                    </div>
+                </div>
+            </div>
+
+            <!--режим листания: страница = один раздел, навигация тапом по краям / свайпом / стрелками-->
+            <div v-else
+                ref="contentPage"
+                class="reader-content" :class="contentFontClass" :style="{fontSize: fontSize + 'px'}"
+                @scroll="onScrollContent" @click="onPageTap"
+                @touchstart.passive="onTouchStart" @touchend="onTouchEnd">
+                <div v-if="currentSection" class="reader-content-inner">
                     <h2 v-if="currentSection.title" class="reader-section-title">{{ currentSection.title }}</h2>
                     <div class="reader-section-html" v-html="currentSection.html" />
                 </div>
             </div>
-            <div class="reader-bottombar">
-                <div class="row items-center no-wrap">
-                    <DivBtn size="32" icon="la la-chevron-left" :disabled="sectionIndex === 0" @meClick="prevSection">Назад</DivBtn>
-                    <span class="col reader-pos">{{ sectionIndex + 1 }} / {{ book.total }} · {{ percent }}%</span>
-                    <DivBtn size="32" icon="la la-chevron-right" :disabled="sectionIndex >= book.total - 1" @meClick="nextSection">Дальше</DivBtn>
-                </div>
+
+            <div class="reader-hud-bottom" :class="{off: !uiVisible}">
+                <span class="reader-pos">{{ sectionIndex + 1 }} / {{ book.total }} · {{ percent }}%</span>
             </div>
         </template>
+
+        <!--панель настроек-->
+        <div v-if="panelOpen" class="reader-panel-backdrop" @click="closePanel" />
+        <div class="reader-panel" :class="{open: panelOpen}">
+            <div class="row items-center reader-panel-head">
+                <span class="col reader-panel-title">Настройки читалки</span>
+                <span class="rp-close" @click="closePanel"><i class="la la-times" /></span>
+            </div>
+            <div class="column reader-panel-body">
+                <div class="row items-center reader-panel-row">
+                    <span class="reader-panel-label">Тема</span>
+                    <div class="rp-opt" :class="{active: theme === 'day'}" @click="setTheme('day')">Дневная</div>
+                    <div class="rp-opt" :class="{active: theme === 'night'}" @click="setTheme('night')">Ночная</div>
+                    <div class="rp-opt" :class="{active: theme === 'sand'}" @click="setTheme('sand')">Песочная</div>
+                </div>
+                <div class="row items-center reader-panel-row">
+                    <span class="reader-panel-label">Шрифт</span>
+                    <div class="rp-opt" :class="{active: fontFam === 'sans'}" @click="setFontFam('sans')">Без засечек</div>
+                    <div class="rp-opt" :class="{active: fontFam === 'serif'}" @click="setFontFam('serif')">С засечками</div>
+                </div>
+                <div class="row items-center reader-panel-row">
+                    <span class="reader-panel-label">Размер</span>
+                    <div class="rp-opt" @click="changeFontSize(-1)">A−</div>
+                    <span class="reader-panel-size">{{ fontSize }}</span>
+                    <div class="rp-opt" @click="changeFontSize(1)">A+</div>
+                </div>
+                <div class="row items-center reader-panel-row">
+                    <span class="reader-panel-label">Режим</span>
+                    <div class="rp-opt" :class="{active: mode === 'scroll'}" @click="setMode('scroll')">Прокрутка</div>
+                    <div class="rp-opt" :class="{active: mode === 'page'}" @click="setMode('page')">Листание</div>
+                </div>
+                <div class="row items-center reader-panel-row">
+                    <div class="rp-opt rp-danger" @click="removeFromDevice">
+                        <i class="la la-trash rp-icon" />Удалить книгу с устройства
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 </template>
 
@@ -63,6 +118,9 @@ import DivBtn from '../share/DivBtn.vue';
 import {parseFb2} from './reader/fb2Reader';
 import {parseEpub} from './reader/epubReader';
 import * as readerStorage from './reader/readerStorage';
+
+const SETTINGS_KEY = 'inpx-reader-settings';
+const HIDE_DELAY = 3500; //мс бездействия, через которые интерфейс скрывается
 
 const componentOptions = {
     components: {
@@ -85,14 +143,28 @@ class TileReader {
     error = '';
     book = null; // {title, author, sections, total, imageUrls}
     sectionIndex = 0;
-    fontSize = 18;
     offsetFrac = 0;
     downloadLoaded = 0;
     downloadTotal = 0;
     meta = null;
 
+    //настройки интерфейса читалки (сохраняются на устройстве)
+    theme = 'day'; //day | night | sand
+    fontFam = 'sans'; //sans | serif
+    fontSize = 18;
+    mode = 'scroll'; //scroll | page
+
+    uiVisible = true;
+    panelOpen = false;
+
+    sectionTops = [];
+    sectionHeights = [];
+    touchX = 0;
+    touchY = 0;
+
     scrollSaveTimer = null;
     lastOffsetUpdate = 0;
+    hideTimer = null;
     loadToken = 0;
 
     get profile() {
@@ -101,6 +173,10 @@ class TileReader {
 
     get currentSection() {
         return (this.book && this.book.sections[this.sectionIndex]) || null;
+    }
+
+    get contentFontClass() {
+        return (this.fontFam === 'serif' ? 'reader-content-serif' : '');
     }
 
     get percent() {
@@ -142,10 +218,11 @@ class TileReader {
     }
 
     mounted() {
-        this.fontSize = parseInt(localStorage.getItem('inpx-reader-fontSize'), 10) || 18;
+        this.loadSettings();
         window.addEventListener('pagehide', this.onPageHide);
         document.addEventListener('visibilitychange', this.onVisChange);
         window.addEventListener('keydown', this.onKeydown);
+        window.addEventListener('resize', this.onResize);
         this.load();
     }
 
@@ -157,7 +234,9 @@ class TileReader {
         window.removeEventListener('pagehide', this.onPageHide);
         document.removeEventListener('visibilitychange', this.onVisChange);
         window.removeEventListener('keydown', this.onKeydown);
+        window.removeEventListener('resize', this.onResize);
         this.clearScrollTimer();
+        this.clearHideTimer();
         this.flushProgress();
         this.revokeImageUrls();
     }
@@ -167,6 +246,120 @@ class TileReader {
         this.uid = this.$route.params.uid || '';
         this.load();
     }
+
+    //---настройки интерфейса-----------------------------------------------------
+
+    loadSettings() {
+        let s = {};
+        try {
+            s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+        } catch (e) {
+            s = {};
+        }
+        if (!s.fontSize) {
+            const old = parseInt(localStorage.getItem('inpx-reader-fontSize'), 10);
+            if (old)
+                s.fontSize = old;
+        }
+        this.theme = ['day', 'night', 'sand'].includes(s.theme) ? s.theme : 'day';
+        this.fontFam = (s.fontFam === 'serif') ? 'serif' : 'sans';
+        this.fontSize = Math.max(12, Math.min(32, parseInt(s.fontSize, 10) || 18));
+        this.mode = (s.mode === 'page' || s.mode === 'scroll') ? s.mode : 'scroll';
+    }
+
+    saveSettings() {
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+            theme: this.theme,
+            fontFam: this.fontFam,
+            fontSize: this.fontSize,
+            mode: this.mode,
+        }));
+    }
+
+    setTheme(t) {
+        if (t === this.theme)
+            return;
+        this.theme = t;
+        this.saveSettings();
+    }
+
+    setFontFam(f) {
+        if (f === this.fontFam)
+            return;
+        this.fontFam = f;
+        this.saveSettings();
+    }
+
+    setMode(m) {
+        if (m === this.mode || this.phase !== 'ready')
+            return;
+        this.mode = m;
+        this.saveSettings();
+        this.$nextTick(() => this.onModeChanged());
+    }
+
+    onModeChanged() {
+        if (this.mode === 'scroll') {
+            this.computeMetrics();
+            this.restoreScroll();
+        } else {
+            this.restorePageScroll();
+        }
+    }
+
+    changeFontSize(delta) {
+        this.fontSize = Math.max(12, Math.min(32, this.fontSize + delta * 2));
+        this.saveSettings();
+        if (this.mode === 'scroll' && this.phase === 'ready')
+            this.$nextTick(() => this.computeMetrics());
+    }
+
+    openPanel() {
+        this.panelOpen = true;
+        this.uiVisible = true;
+        this.clearHideTimer();
+    }
+
+    closePanel() {
+        this.panelOpen = false;
+        this.showUi();
+    }
+
+    //---авто-скрытие интерфейса---------------------------------------------------
+
+    showUi() {
+        this.uiVisible = true;
+        this.clearHideTimer();
+        if (this.phase === 'ready' && !this.panelOpen)
+            this.hideTimer = setTimeout(() => {
+                this.hideTimer = null;
+                this.uiVisible = false;
+            }, HIDE_DELAY);
+    }
+
+    hideUiNow() {
+        this.clearHideTimer();
+        if (!this.panelOpen)
+            this.uiVisible = false;
+    }
+
+    onUiActivity() {
+        if (!this.panelOpen)
+            this.showUi();
+    }
+
+    clearHideTimer() {
+        if (this.hideTimer) {
+            clearTimeout(this.hideTimer);
+            this.hideTimer = null;
+        }
+    }
+
+    toggleUi() {
+        this.uiVisible ? this.hideUiNow() : this.showUi();
+    }
+
+    //---загрузка книги------------------------------------------------------------
 
     async load() {
         if (!this.uid) {
@@ -182,6 +375,8 @@ class TileReader {
         this.book = null;
         this.sectionIndex = 0;
         this.offsetFrac = 0;
+        this.sectionTops = [];
+        this.sectionHeights = [];
         this.downloadLoaded = 0;
         this.downloadTotal = 0;
 
@@ -222,7 +417,15 @@ class TileReader {
             }
 
             this.phase = 'ready';
-            this.$nextTick(() => this.restoreScroll());
+            this.showUi();
+            this.$nextTick(() => {
+                if (this.mode === 'scroll') {
+                    this.computeMetrics();
+                    this.restoreScroll();
+                } else {
+                    this.restorePageScroll();
+                }
+            });
         } catch (e) {
             if (token !== this.loadToken)
                 return;
@@ -287,18 +490,41 @@ class TileReader {
         return '';
     }
 
-    restoreScroll() {
-        const el = this.$refs.content;
-        if (el && this.offsetFrac > 0)
-            el.scrollTop = this.offsetFrac * (el.scrollHeight - el.clientHeight);
+    //---положение и прогресс------------------------------------------------------
+
+    //режим прокрутки: позиции и высоты всех разделов относительно контейнера
+    computeMetrics() {
+        const el = this.$refs.contentScroll;
+        this.sectionTops = [];
+        this.sectionHeights = [];
+        if (!el)
+            return;
+        for (const s of el.querySelectorAll('.reader-section')) {
+            this.sectionTops.push(s.offsetTop);
+            this.sectionHeights.push(s.offsetHeight);
+        }
     }
 
-    currentScrollFrac() {
-        const el = this.$refs.content;
+    scrollAnchor() {
+        const el = this.$refs.contentScroll;
+        return (el ? el.clientHeight * 0.3 : 0);
+    }
+
+    restoreScroll() {
+        const el = this.$refs.contentScroll;
+        if (!el || !this.sectionTops.length)
+            return;
+        const i = Math.max(0, Math.min(this.sectionTops.length - 1, this.sectionIndex));
+        const y = this.sectionTops[i] + (this.offsetFrac || 0) * (this.sectionHeights[i] || 0) - this.scrollAnchor();
+        el.scrollTop = Math.max(0, y);
+    }
+
+    restorePageScroll() {
+        const el = this.$refs.contentPage;
         if (!el)
-            return this.offsetFrac;
-        const max = el.scrollHeight - el.clientHeight;
-        return (max > 0 ? el.scrollTop / max : 0);
+            return;
+        const max = Math.max(0, el.scrollHeight - el.clientHeight);
+        el.scrollTop = (this.offsetFrac || 0) * max;
     }
 
     makeProgress() {
@@ -307,7 +533,7 @@ class TileReader {
         return {
             section: this.sectionIndex + 1,
             total: this.book.total,
-            frac: this.currentScrollFrac(),
+            frac: this.offsetFrac,
             time: (new Date()).toISOString(),
         };
     }
@@ -341,12 +567,31 @@ class TileReader {
         }
     }
 
-    onScroll() {
-        //обновляем процент не чаще раза в 200 мс
+    onScrollContent() {
+        const el = this.$refs.contentScroll || this.$refs.contentPage;
+        if (!el)
+            return;
+        this.onUiActivity();
+
         const now = Date.now();
         if (now - this.lastOffsetUpdate > 200) {
             this.lastOffsetUpdate = now;
-            this.offsetFrac = this.currentScrollFrac();
+
+            if (this.mode === 'scroll') {
+                //текущий раздел — тот, что содержит точку 30% высоты вьюпорта
+                const y = el.scrollTop + el.clientHeight * 0.3;
+                let i = 0;
+                for (let k = 0; k < this.sectionTops.length; k++)
+                    if (y >= this.sectionTops[k])
+                        i = k;
+                this.sectionIndex = i;
+                const h = this.sectionHeights[i] || 1;
+                this.offsetFrac = Math.max(0, Math.min(1, (y - this.sectionTops[i]) / h));
+            } else {
+                //листание: доля прокрутки внутри страницы (раздела)
+                const max = el.scrollHeight - el.clientHeight;
+                this.offsetFrac = (max > 0 ? Math.max(0, Math.min(1, el.scrollTop / max)) : 0);
+            }
         }
 
         if (!this.scrollSaveTimer)
@@ -356,14 +601,7 @@ class TileReader {
             }, 2000);
     }
 
-    prevSection() {
-        this.goSection(this.sectionIndex - 1);
-    }
-
-    nextSection() {
-        this.goSection(this.sectionIndex + 1);
-    }
-
+    //режим листания: листаем разделы
     goSection(i) {
         if (!this.book || i < 0 || i >= this.book.total)
             return;
@@ -372,22 +610,114 @@ class TileReader {
         this.sectionIndex = i;
         this.offsetFrac = 0;
         this.lastOffsetUpdate = 0;
-        const el = this.$refs.content;
+        const el = this.$refs.contentPage;
         if (el)
             el.scrollTop = 0;
+        this.showUi();
         this.$nextTick(() => this.saveProgressLocal());
     }
 
+    //режим прокрутки: прыжок к разделу
+    jumpToSection(i) {
+        if (!this.book || i < 0 || i >= this.book.total)
+            return;
+        const el = this.$refs.contentScroll;
+        if (!el || !this.sectionTops.length)
+            return;
+        this.sectionIndex = i;
+        el.scrollTop = this.sectionTops[i];
+        this.showUi();
+    }
+
+    prevSection() {
+        if (this.mode === 'page')
+            this.goSection(this.sectionIndex - 1);
+        else
+            this.jumpToSection(this.sectionIndex - 1);
+    }
+
+    nextSection() {
+        if (this.mode === 'page')
+            this.goSection(this.sectionIndex + 1);
+        else
+            this.jumpToSection(this.sectionIndex + 1);
+    }
+
+    //---ввод: тапы, свайпы, клавиши--------------------------------------------------
+
+    onScrollTap() {
+        if (this.panelOpen)
+            return;
+        this.toggleUi();
+    }
+
+    onPageTap(e) {
+        if (this.panelOpen || this.phase !== 'ready')
+            return;
+        const t = e.target;
+        if (t && t.closest && t.closest('a'))
+            return; //ссылки в тексте — не листаем
+        const el = this.$refs.contentPage;
+        if (!el)
+            return;
+        const rect = el.getBoundingClientRect();
+        const w = rect.width || 1;
+        const x = e.clientX - rect.left;
+        if (x < w * 0.3)
+            this.goSection(this.sectionIndex - 1);
+        else if (x > w * 0.7)
+            this.goSection(this.sectionIndex + 1);
+        else
+            this.toggleUi();
+    }
+
+    onTouchStart(e) {
+        const t = e.touches[0];
+        if (t) {
+            this.touchX = t.clientX;
+            this.touchY = t.clientY;
+        }
+        this.onUiActivity();
+    }
+
+    onTouchEnd(e) {
+        if (this.mode !== 'page' || this.phase !== 'ready')
+            return;
+        const t = e.changedTouches[0];
+        if (!t)
+            return;
+        const dx = t.clientX - this.touchX;
+        const dy = t.clientY - this.touchY;
+        //свайп: сильнее 60px и горизонталь доминирует
+        if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) {
+            if (dx < 0)
+                this.goSection(this.sectionIndex + 1);
+            else
+                this.goSection(this.sectionIndex - 1);
+        }
+    }
+
     onKeydown(e) {
+        if (this.panelOpen) {
+            if (e.key === 'Escape')
+                this.closePanel();
+            return;
+        }
+        this.onUiActivity();
         if (this.phase !== 'ready')
             return;
-        if (e.key === 'ArrowRight') {
+        if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') {
             e.preventDefault();
             this.nextSection();
-        } else if (e.key === 'ArrowLeft') {
+        } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
             e.preventDefault();
             this.prevSection();
         }
+    }
+
+    onResize() {
+        if (this.mode === 'scroll' && this.phase === 'ready')
+            this.computeMetrics();
     }
 
     onPageHide() {
@@ -399,18 +729,18 @@ class TileReader {
             this.flushProgress();
     }
 
-    changeFontSize(delta) {
-        this.fontSize = Math.max(12, Math.min(32, this.fontSize + delta * 2));
-        localStorage.setItem('inpx-reader-fontSize', String(this.fontSize));
-    }
+    //---прочее---------------------------------------------------------------------
 
     async removeFromDevice() {
+        this.panelOpen = false;
         const ok = await this.$root.stdDialog.confirm(
             'Удалить книгу и прогресс с этого устройства?',
             'Удаление с устройства',
         );
-        if (!ok)
+        if (!ok) {
+            this.showUi();
             return;
+        }
 
         await readerStorage.removeBook(this.uid);
         await readerStorage.removeProgress(this.uid);
@@ -446,10 +776,57 @@ export default vueComponent(TileReader);
     left: 0;
     right: 0;
     bottom: 0;
-    background: #fff;
     display: flex;
     flex-direction: column;
+    overflow: hidden;
+    background: var(--r-bg);
+    color: var(--r-text);
     font-family: 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+/*темы: дневная / ночная / песочная*/
+.theme-day {
+    --r-bg: #ffffff;
+    --r-text: #1c1c1c;
+    --r-bar: #f7f7f7;
+    --r-border: #e0e0e0;
+    --r-muted: #666666;
+    --r-accent: #1976d2;
+    --r-soft: #f2f2f2;
+}
+.theme-night {
+    --r-bg: #101418;
+    --r-text: #c9cdd3;
+    --r-bar: #161b20;
+    --r-border: #272e36;
+    --r-muted: #8b939c;
+    --r-accent: #8ab4ff;
+    --r-soft: #1b2127;
+}
+.theme-sand {
+    --r-bg: #f4ecd8;
+    --r-text: #3d3427;
+    --r-bar: #ece1c6;
+    --r-border: #d8c89f;
+    --r-muted: #7c6f56;
+    --r-accent: #8a6d3b;
+    --r-soft: #eaddbe;
+}
+
+/*верхний HUD: верхняя панель + линия прогресса, скрывается автоматически*/
+.reader-hud-top {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 10;
+    transition: transform 0.3s ease, opacity 0.3s ease;
+}
+
+.reader-hud-top.off {
+    transform: translateY(-100%);
+    opacity: 0;
+    pointer-events: none;
 }
 
 .reader-topbar {
@@ -457,8 +834,8 @@ export default vueComponent(TileReader);
     align-items: center;
     gap: 8px;
     padding: 8px 12px;
-    border-bottom: 1px solid #e0e0e0;
-    background: #fafafa;
+    border-bottom: 1px solid var(--r-border);
+    background: var(--r-bar);
     min-height: 48px;
 }
 
@@ -467,14 +844,14 @@ export default vueComponent(TileReader);
     align-items: center;
     gap: 4px;
     cursor: pointer;
-    color: #333;
+    color: var(--r-text);
     white-space: nowrap;
     text-decoration: none;
     font-size: 13px;
 }
 
 .reader-back:hover {
-    color: #000;
+    color: var(--r-accent);
 }
 
 .reader-title {
@@ -491,7 +868,7 @@ export default vueComponent(TileReader);
 
 .reader-title-author {
     font-size: 12px;
-    color: #666;
+    color: var(--r-muted);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -503,20 +880,55 @@ export default vueComponent(TileReader);
 
 .reader-progress-line {
     height: 3px;
-    background: #eee;
+    background: var(--r-border);
 }
 
 .reader-progress-fill {
     height: 100%;
-    background: #4caf50;
+    background: var(--r-accent);
     transition: width 0.2s linear;
 }
 
+/*нижний HUD: позиция в книге, тоже скрывается*/
+.reader-hud-bottom {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom)) 12px;
+    border-top: 1px solid var(--r-border);
+    background: var(--r-bar);
+    transition: transform 0.3s ease, opacity 0.3s ease;
+}
+
+.reader-hud-bottom.off {
+    transform: translateY(100%);
+    opacity: 0;
+    pointer-events: none;
+}
+
+.reader-pos {
+    font-size: 13px;
+    color: var(--r-muted);
+    text-align: center;
+    white-space: nowrap;
+}
+
+/*текст книги: отступы под HUD сверху и снизу*/
 .reader-content {
     flex: 1;
+    position: relative;
     overflow-y: auto;
-    padding: 16px 16px 32px 16px;
+    padding: 70px 16px 72px 16px;
     line-height: 1.65;
+}
+
+.reader-content-serif {
+    font-family: Georgia, 'Times New Roman', 'PT Serif', serif;
 }
 
 .reader-content-inner {
@@ -524,11 +936,15 @@ export default vueComponent(TileReader);
     margin: 0 auto;
 }
 
+.reader-section {
+    margin: 0 0 2em 0;
+}
+
 .reader-section-title {
     font-size: 1.4em;
     font-weight: 600;
     margin: 8px 0 16px 0;
-    color: #222;
+    color: var(--r-text);
 }
 
 .reader-section-html p {
@@ -544,6 +960,7 @@ export default vueComponent(TileReader);
 .reader-section-html .fb2-subtitle {
     text-align: center;
     margin: 1.5em 0;
+    color: var(--r-text);
 }
 
 .reader-section-html .fb2-epigraph,
@@ -551,7 +968,7 @@ export default vueComponent(TileReader);
 .reader-section-html .fb2-block {
     margin: 1em 0;
     padding: 0 12px;
-    color: #444;
+    color: var(--r-muted);
 }
 
 .reader-section-html img {
@@ -563,12 +980,16 @@ export default vueComponent(TileReader);
 .reader-section-html blockquote {
     margin: 1em 0;
     padding-left: 16px;
-    border-left: 3px solid #ddd;
-    color: #444;
+    border-left: 3px solid var(--r-border);
+    color: var(--r-muted);
+}
+
+.reader-section-html a {
+    color: var(--r-accent);
 }
 
 .reader-section-html pre {
-    background: #f6f6f6;
+    background: var(--r-soft);
     padding: 8px;
     overflow-x: auto;
 }
@@ -581,7 +1002,7 @@ export default vueComponent(TileReader);
     justify-content: center;
     padding: 24px;
     gap: 12px;
-    color: #555;
+    color: var(--r-muted);
 }
 
 .reader-status-msg {
@@ -590,7 +1011,7 @@ export default vueComponent(TileReader);
 
 .reader-status-sub {
     font-size: 13px;
-    color: #888;
+    color: var(--r-muted);
 }
 
 .reader-progress-bar {
@@ -598,12 +1019,12 @@ export default vueComponent(TileReader);
     max-width: 320px;
     height: 8px;
     border-radius: 4px;
-    background: #eee;
+    background: var(--r-border);
     overflow: hidden;
 }
 
 .reader-link {
-    color: #1976d2;
+    color: var(--r-accent);
     text-decoration: none;
     font-size: 14px;
 }
@@ -612,20 +1033,109 @@ export default vueComponent(TileReader);
     text-decoration: underline;
 }
 
-.reader-bottombar {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 12px;
-    padding: 10px 12px calc(10px + env(safe-area-inset-bottom)) 12px;
-    border-top: 1px solid #e0e0e0;
-    background: #fafafa;
+/*панель настроек: шторка снизу*/
+.reader-panel-backdrop {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.35);
+    z-index: 20;
 }
 
-.reader-pos {
+.reader-panel {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    background: var(--r-bar);
+    border-top: 1px solid var(--r-border);
+    border-radius: 12px 12px 0 0;
+    transform: translateY(100%);
+    transition: transform 0.25s ease;
+    max-height: 70%;
+    overflow-y: auto;
+}
+
+.reader-panel.open {
+    transform: translateY(0);
+}
+
+.reader-panel-head {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--r-border);
+}
+
+.reader-panel-title {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.rp-close {
+    cursor: pointer;
+    font-size: 18px;
+    color: var(--r-muted);
+    padding: 0 4px;
+}
+
+.rp-close:hover {
+    color: var(--r-text);
+}
+
+.reader-panel-body {
+    padding: 8px 12px calc(12px + env(safe-area-inset-bottom)) 12px;
+}
+
+.reader-panel-row {
+    margin: 8px 0;
+    gap: 8px;
+}
+
+.reader-panel-label {
     font-size: 13px;
-    color: #555;
+    color: var(--r-muted);
+    min-width: 64px;
+}
+
+.reader-panel-size {
+    font-size: 13px;
+    color: var(--r-muted);
+    min-width: 20px;
     text-align: center;
+}
+
+.rp-opt {
+    padding: 5px 12px;
+    border: 1px solid var(--r-border);
+    border-radius: 14px;
+    font-size: 13px;
+    color: var(--r-text);
+    cursor: pointer;
     white-space: nowrap;
+    user-select: none;
+}
+
+.rp-opt:hover {
+    border-color: var(--r-muted);
+}
+
+.rp-opt.active {
+    background: var(--r-accent);
+    border-color: var(--r-accent);
+    color: #fff;
+}
+
+.rp-danger {
+    color: #c62828;
+    border-color: #c62828;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.rp-icon {
+    font-size: 12px;
 }
 </style>

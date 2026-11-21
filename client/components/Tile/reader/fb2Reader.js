@@ -113,6 +113,18 @@ async function sectionHtml(section, resolver) {
     return html;
 }
 
+//заголовок раздела: <title> может содержать несколько <p>
+//(«Глава 1» + «Название главы») — склеиваем строки прочитываемым образом
+function sectionTitle(titleEl) {
+    if (!titleEl)
+        return '';
+    const ps = titleEl.querySelectorAll(':scope > p');
+    const lines = (ps.length
+        ? [...ps].map((p) => p.textContent.trim()).filter((s) => s)
+        : [titleEl.textContent.trim()]);
+    return lines.join(' — ');
+}
+
 function personName(doc, tag) {
     const el = doc.querySelector(`description > ${tag}`);
     if (!el)
@@ -145,7 +157,9 @@ export async function parseFb2(buf) {
     if (sectionEls.length) {
         for (const s of sectionEls) {
             const titleEl = s.querySelector(':scope > title');
-            const secTitle = titleEl ? titleEl.textContent.trim() : '';
+            const secTitle = sectionTitle(titleEl);
+            if (titleEl)
+                titleEl.remove(); //заголовок показываем один раз (h2), не дублируем в теле
             const html = await sectionHtml(s, resolver);
             if (html || secTitle)
                 sections.push({title: secTitle, html});

@@ -90,9 +90,15 @@ async function blockHtml(node, getImgUrl) {
     return html;
 }
 
-async function docTitle(doc) {
+//заголовок раздела: первый заголовок документа. Элемент вырезаем —
+//иначе он продублируется и в title, и в теле раздела
+function docTitle(doc) {
     const h = doc.querySelector('h1, h2, h3, [role="heading"], header p, header h1, header h2');
-    return h ? h.textContent.replace(/\s+/g, ' ').trim() : '';
+    if (!h)
+        return '';
+    const t = h.textContent.replace(/\s+/g, ' ').trim();
+    h.remove();
+    return t;
 }
 
 export async function parseEpub(buf) {
@@ -176,9 +182,10 @@ export async function parseEpub(buf) {
             if (!body)
                 continue;
 
+            const secTitle = docTitle(doc); //вырезаем ДО построения html, чтобы не дублировать
             const html = await blockHtml(body, getImgUrl);
             if (html)
-                sections.push({title: await docTitle(doc), html});
+                sections.push({title: secTitle, html});
         }
     }
 
