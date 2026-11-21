@@ -20,6 +20,10 @@
                 <div v-if="total > 0" class="text-grey-7">
                     найдено: {{ total }}
                 </div>
+                <a class="q-ml-md tile-head-profile" :href="'#/tile/settings'">
+                    <i class="la la-cog" />
+                    <span class="q-ml-xs">{{ profile || 'настройки' }}</span>
+                </a>
             </div>
             <TileSearchBar class="q-mt-sm" />
         </div>
@@ -173,6 +177,10 @@ class TileSection {
         return !!this.loadingMessage;
     }
 
+    get profile() {
+        return (this.$store.state.settings.tileProfile || '');
+    }
+
     get page() {
         return Math.floor(this.offset / this.limit) + 1;
     }
@@ -277,7 +285,7 @@ class TileSection {
         this.loadingMessage = 'Загрузка...';
         this.error = '';
         try {
-            const result = await this.api.getTileSection(this.type, this.value, this.offset, this.limit, this.sort);
+            const result = await this.api.getTileSection(this.type, this.value, this.offset, this.limit, this.sort, this.profile || undefined);
             if (generation !== this.reloadGeneration)
                 return;
             this.books = (result.books || []);
@@ -400,6 +408,23 @@ export default vueComponent(TileSection);
     z-index: 10;
     background: #e0f2f1;
     padding: 8px 16px;
+}
+
+.tile-head-profile {
+    display: inline-flex;
+    align-items: center;
+    height: 28px;
+    padding: 0 10px;
+    background: #ffffff;
+    border-radius: 4px;
+    color: #1976d2;
+    font-size: 13px;
+    text-decoration: none;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+a.tile-head-profile:hover {
+    background: #e3f2fd;
 }
 
 .tile-section-title {

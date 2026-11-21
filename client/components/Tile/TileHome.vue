@@ -11,6 +11,13 @@
                     </q-tooltip>
                 </a>
                 <div class="q-ml-sm tile-home-title">{{ collection }}</div>
+                <a class="q-ml-md tile-head-profile" :href="'#/tile/settings'">
+                    <i class="la la-cog" />
+                    <span class="q-ml-xs">{{ profile || 'настройки' }}</span>
+                    <q-tooltip :delay="1500" anchor="bottom middle" content-style="font-size: 80%">
+                        Профиль и настройки
+                    </q-tooltip>
+                </a>
                 <div class="q-ml-md">
                     <DivBtn size="28" icon="la la-refresh" :disabled="loading" @meClick="refresh">обновить</DivBtn>
                 </div>
@@ -23,18 +30,18 @@
         </div>
 
         <div v-if="data.seed" class="tile-body">
-            <TileFeed title="Новые книги" :books="data.new" :covers="covers" />
-            <TileFeed title="Лучшие книги" :books="data.top" :covers="covers" />
-            <TileFeed title="Серии: новые" :books="seriesNew" :covers="covers" />
-            <TileFeed title="Серии: лучшие" :books="seriesTop" :covers="covers" />
-            <template v-for="(f, i) in data.years" :key="`year-${i}`">
-                <TileFeed :title="`${f.year}`" :title-href="sectionLink('year', f.year)" :books="f.books" :covers="covers" />
+            <TileFeed v-if="!isFeedOff('new')" title="Новые книги" :books="data.new" :covers="covers" :read-uids="readUids" />
+            <TileFeed v-if="!isFeedOff('top')" title="Лучшие книги" :books="data.top" :covers="covers" :read-uids="readUids" />
+            <TileFeed v-if="!isFeedOff('seriesNew')" title="Серии: новые" :books="seriesNew" :covers="covers" :read-uids="readUids" />
+            <TileFeed v-if="!isFeedOff('seriesTop')" title="Серии: лучшие" :books="seriesTop" :covers="covers" :read-uids="readUids" />
+            <template v-for="(f, i) in yearFeeds" :key="`year-${i}`">
+                <TileFeed v-if="f.books.length" :title="`${f.year}`" :title-href="sectionLink('year', f.year)" :books="f.books" :covers="covers" :read-uids="readUids" />
             </template>
             <template v-for="(g, i) in data.genres" :key="`genre-${i}`">
-                <TileFeed :title="g.name" suffix=": новые" :title-href="sectionLink('genre', g.value)" :books="g.new" :covers="covers" />
-                <TileFeed :title="g.name" suffix=": лучшие" :title-href="sectionLink('genre', g.value)" :subgenres="genreSubs(g.value)" :books="g.best" :covers="covers" />
+                <TileFeed v-if="!isFeedOff('genres') && !isFeedOff(`genre-new:${g.value}`)" :title="g.name" suffix=": новые" :title-href="sectionLink('genre', g.value)" :books="g.new" :covers="covers" :read-uids="readUids" />
+                <TileFeed v-if="!isFeedOff('genres') && !isFeedOff(`genre-best:${g.value}`)" :title="g.name" suffix=": лучшие" :title-href="sectionLink('genre', g.value)" :subgenres="genreSubs(g.value)" :books="g.best" :covers="covers" :read-uids="readUids" />
             </template>
-            <TileFeed title="Авторы" :books="authorCards" :covers="covers" />
+            <TileFeed v-if="!isFeedOff('authors')" title="Авторы" :books="authorCards" :covers="covers" :read-uids="readUids" />
         </div>
     </div>
 </template>
@@ -77,6 +84,29 @@ class TileHome {
         return config.dbConfig.inpxInfo.collection.split('\n')[0].trim();
     }
 
+    get profile() {
+        return (this.$store.state.settings.tileProfile || '');
+    }
+
+    get disabledFeeds() {
+        return new Set((this.data.disabledFeeds || []));
+    }
+
+    get readUids() {
+        return (this.data.readUids || []);
+    }
+
+    isFeedOff(id) {
+        return this.disabledFeeds.has(id);
+    }
+
+    get yearFeeds() {
+        //отключённый блок по годам не показываем вовсе
+        if (this.isFeedOff('years'))
+            return [];
+        return (this.data.years || []);
+    }
+
     created() {
         this.api = this.$root.api;
     }
@@ -99,7 +129,7 @@ class TileHome {
 
         (async() => {
             try {
-                const result = await this.api.getTileHome(seed);
+                const result = await this.api.getTileHome(seed, this.profile || undefined);
                 this.data = result;
 
                 this.seriesNew = result.seriesNew.map((c) => ({
@@ -212,6 +242,23 @@ export default vueComponent(TileHome);
 .tile-home-title {
     font-size: 20px;
     font-weight: bold;
+}
+
+.tile-head-profile {
+    display: inline-flex;
+    align-items: center;
+    height: 28px;
+    padding: 0 10px;
+    background: #ffffff;
+    border-radius: 4px;
+    color: #1976d2;
+    font-size: 13px;
+    text-decoration: none;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+a.tile-head-profile:hover {
+    background: #e3f2fd;
 }
 
 .tile-body {

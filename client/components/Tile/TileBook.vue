@@ -3,7 +3,13 @@
         <LoadingMessage :message="loadingMessage" />
 
         <div class="tile-topbar">
-            <TileSearchBar />
+            <div class="row items-center">
+                <TileSearchBar class="tile-topbar-search" />
+                <a class="q-ml-md tile-head-profile" :href="'#/tile/settings'">
+                    <i class="la la-cog" />
+                    <span class="q-ml-xs">{{ profile || 'настройки' }}</span>
+                </a>
+            </div>
         </div>
 
         <div v-if="error" class="text-red q-pa-md">
@@ -56,6 +62,47 @@
                 </div>
                 <div class="row q-mt-lg">
                     <DivBtn size="32" icon="la la-download" :disabled="loading" @meClick="download">Скачать</DivBtn>
+                    <DivBtn
+                        size="32"
+                        class="q-ml-sm"
+                        :icon="user.read ? 'la la-check-square' : 'la la-square-o'"
+                        @meClick="toggleRead"
+                    >{{ user.read ? 'Прочитано' : 'Отметить прочитанным' }}</DivBtn>
+                </div>
+
+                <div class="tile-user q-mt-lg">
+                    <div class="tile-block-head">Мои данные</div>
+                    <div v-if="!profile" class="tile-block-note">
+                        Задать профиль в настройках, чтобы отмечать прочитанные книги, ставить оценки и писать отзывы
+                    </div>
+                    <template v-else>
+                        <div class="row items-center q-mt-sm">
+                            <span class="text-grey-7 q-mr-sm">Моя оценка:</span>
+                            <span v-if="user.rating" class="q-mr-sm"><TileStars :rating="user.rating" :size="14" /></span>
+                            <template v-for="n in 5" :key="`setstar-${n}`">
+                                <span
+                                    class="tile-set-star"
+                                    :class="{'tile-set-star-on': n <= user.rating}"
+                                    @click="setRating(n)"
+                                ><i class="la la-star" /></span>
+                            </template>
+                            <a v-if="user.rating" class="q-ml-sm tile-unset-link" @click="setRating(0)">снять</a>
+                        </div>
+
+                        <div class="tile-subhead q-mt-md">Мой отзыв</div>
+                        <textarea v-model="reviewText" class="tile-review-input" placeholder="Ваш отзыв о книге..." rows="4" />
+                        <div class="row items-center q-mt-xs">
+                            <DivBtn size="28" :disabled="userBusy || !reviewText.trim()" @meClick="saveReview">Сохранить отзыв</DivBtn>
+                            <a v-if="user.review" class="q-ml-sm tile-unset-link" @click="clearReview">удалить отзыв</a>
+                        </div>
+
+                        <div class="tile-subhead q-mt-md">Игнорировать</div>
+                        <div class="row items-center q-mt-xs no-wrap">
+                            <DivBtn size="26" icon="la la-ban" @meClick="ignoreBook">Книгу</DivBtn>
+                            <DivBtn v-if="book.authorId" size="26" class="q-ml-xs" icon="la la-user" @meClick="ignoreAuthor">Автора</DivBtn>
+                            <DivBtn v-if="book.series" size="26" class="q-ml-xs" icon="la la-layer-group" @meClick="ignoreSeries">Серию</DivBtn>
+                        </div>
+                    </template>
                 </div>
 
                 <div v-if="annotation" class="tile-annotation q-mt-lg" v-html="annotation" />
@@ -124,6 +171,9 @@ class TileBook {
     seriesBooks = [];
     loadingMessage = '';
     error = '';
+    user = {read: false, rating: 0, review: ''};
+    reviewText = '';
+    userBusy = false;
 
     loadToken = 0;
     annotation = '';
@@ -141,6 +191,10 @@ class TileBook {
         if (!this.reviews.declaredCount)
             return '';
         return (this.reviews.sum / this.reviews.declaredCount).toFixed(1);
+    }
+
+    get profile() {
+        return (this.$store.state.settings.tileProfile || '');
     }
 
     created() {
@@ -172,16 +226,21 @@ class TileBook {
         this.reviewsLoading = false;
         this.reviewsError = '';
         this.reviews = {declaredCount: 0, sum: 0, foundCount: 0, reviews: []};
+        this.user = {read: false, rating: 0, review: ''};
+        this.reviewText = '';
 
         const token = ++this.loadToken;
         try {
-            const result = await this.api.getTileBook(uid);
+            const result = await this.api.getTileBook(uid, this.profile || undefined);
             if (token !== this.loadToken)
                 return;
 
             this.book = result.book;
             this.cover = (result.cover || '');
             this.seriesBooks = (result.seriesBooks || []);
+            if (result.user)
+                this.user = result.user;
+            this.reviewText = (this.user.review || '');
             await this.makeGenres();
             this.loadExtra(uid, token);
         } catch (e) {
@@ -243,6 +302,125 @@ class TileBook {
 
     get authorLink() {
         return `#/tile/section/author/${this.book.authorId}`;
+    }
+
+    //мои данные: оценка, прочитано, отзыв, игнор
+    checkProfile() {
+        if (!this.profile) {
+            this.$root.stdDialog.alert('Сначала задайте профиль в настройках', 'Мои данные');
+            return false;
+        }
+        return true;
+    }
+
+    async setRating(rate) {
+        if (!this.checkProfile())
+            return;
+
+        try {
+            this.userBusy = true;
+            await this.api.setUserRating(this.profile, this.book._uid, rate);
+            this.user.rating = rate;
+        } catch (e) {
+            this.$root.stdDialog.alert(e.message, 'Ошибка');
+        } finally {
+            this.userBusy = false;
+        }
+    }
+
+    async toggleRead() {
+        if (!this.checkProfile())
+            return;
+
+        try {
+            this.userBusy = true;
+            const res = await this.api.toggleRead(this.profile, this.book._uid);
+            this.user.read = !!res.read;
+        } catch (e) {
+            this.$root.stdDialog.alert(e.message, 'Ошибка');
+        } finally {
+            this.userBusy = false;
+        }
+    }
+
+    async saveReview() {
+        if (!this.checkProfile())
+            return;
+        if (!this.reviewText.trim())
+            return;
+
+        try {
+            this.userBusy = true;
+            await this.api.setUserReview(this.profile, this.book._uid, this.reviewText.trim());
+            this.user.review = this.reviewText.trim();
+        } catch (e) {
+            this.$root.stdDialog.alert(e.message, 'Ошибка');
+        } finally {
+            this.userBusy = false;
+        }
+    }
+
+    async clearReview() {
+        if (!this.checkProfile() || !this.user.review)
+            return;
+
+        try {
+            this.userBusy = true;
+            await this.api.setUserReview(this.profile, this.book._uid, '');
+            this.user.review = '';
+            this.reviewText = '';
+        } catch (e) {
+            this.$root.stdDialog.alert(e.message, 'Ошибка');
+        } finally {
+            this.userBusy = false;
+        }
+    }
+
+    async ignoreBook() {
+        if (!this.checkProfile())
+            return;
+
+        try {
+            const res = await this.api.ignoreItem(this.profile, 'book', this.book._uid, {
+                title: this.book.title,
+                author: (this.book.author || '').split(',')[0].trim(),
+                series: (this.book.series || ''),
+            });
+            if (!res.ignored)
+                this.$root.stdDialog.alert('Книга уже в списке игнорируемых', 'Игнор');
+        } catch (e) {
+            this.$root.stdDialog.alert(e.message, 'Ошибка');
+        }
+    }
+
+    async ignoreAuthor() {
+        if (!this.checkProfile())
+            return;
+
+        try {
+            const res = await this.api.ignoreItem(this.profile, 'author', String(this.book.authorId), {
+                name: (this.book.author || '').split(',')[0].trim(),
+            });
+            if (!res.ignored)
+                this.$root.stdDialog.alert('Автор уже в списке игнорируемых', 'Игнор');
+        } catch (e) {
+            this.$root.stdDialog.alert(e.message, 'Ошибка');
+        }
+    }
+
+    async ignoreSeries() {
+        if (!this.checkProfile() || !this.book.series)
+            return;
+
+        try {
+            const res = await this.api.ignoreItem(this.profile, 'series', this.book.series, {
+                count: 0,
+            });
+            if (!res.ignored)
+                this.$root.stdDialog.alert('Серия уже в списке игнорируемых', 'Игнор');
+        } catch (e) {
+            this.$root.stdDialog.alert(e.message, 'Ошибка');
+        }
     }
 
     convertGenres(value) {
@@ -316,6 +494,80 @@ export default vueComponent(TileBook);
     z-index: 10;
     background: #e0f2f1;
     padding: 8px 16px;
+}
+
+.tile-topbar-search {
+    flex: 1 1 auto;
+}
+
+.tile-head-profile {
+    display: inline-flex;
+    align-items: center;
+    height: 28px;
+    padding: 0 10px;
+    background: #ffffff;
+    border-radius: 4px;
+    color: #1976d2;
+    font-size: 13px;
+    text-decoration: none;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+    flex: 0 0 auto;
+}
+
+a.tile-head-profile:hover {
+    background: #e3f2fd;
+}
+
+.tile-user {
+    background: #ffffff;
+    border-radius: 6px;
+    padding: 10px 14px;
+}
+
+.tile-subhead {
+    font-size: 13px;
+    font-weight: bold;
+    color: #666666;
+}
+
+.tile-set-star {
+    display: inline-block;
+    font-size: 18px;
+    color: #dddddd;
+    cursor: pointer;
+    line-height: 1;
+    transition: color 0.1s linear;
+}
+
+.tile-set-star:hover {
+    color: #ffca28;
+}
+
+.tile-set-star-on {
+    color: #ffc107;
+}
+
+.tile-unset-link {
+    font-size: 12px;
+    color: #999999;
+    cursor: pointer;
+}
+
+a.tile-unset-link:hover {
+    color: #d32f2f;
+}
+
+.tile-review-input {
+    width: 100%;
+    box-sizing: border-box;
+    margin-top: 4px;
+    padding: 8px 10px;
+    border: 1px solid #cccccc;
+    border-radius: 4px;
+    font-size: 13px;
+    line-height: 1.5;
+    resize: vertical;
+    min-height: 80px;
 }
 
 .tile-book {

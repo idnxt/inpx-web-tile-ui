@@ -17,6 +17,7 @@
                 :cover="covers[c.book._uid]"
                 :label="c.label"
                 :link="c.link"
+                :read="isRead(c.book._uid)"
             />
         </div>
     </div>
@@ -40,11 +41,20 @@ class TileFeed {
         books: {type: Array, default: () => []},
         covers: {type: Object, default: () => ({})},
         subgenres: {type: Array, default: () => []},
+        readUids: {type: Array, default: () => []},
     };
 
     get cards() {
         //элемент — либо объект книги, либо {book, label, link}
         return this.books.map((b) => (b.book ? b : {book: b}));
+    }
+
+    isRead(uid) {
+        return this.readSet.has(uid);
+    }
+
+    get readSet() {
+        return new Set(this.readUids || []);
     }
 }
 

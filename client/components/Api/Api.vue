@@ -268,16 +268,50 @@ class Api {
         return await this.request({action: 'get-genre-tree'});
     }
 
-    async getTileHome(seed) {
-        return await this.request({action: 'get-tile-home', seed}, 60);
+    async getTileHome(seed, profile) {
+        return await this.request({action: 'get-tile-home', seed, profile}, 60);
     }
 
-    async getTileSection(type, value, offset, limit, sort) {
-        return await this.request({action: 'get-tile-section', type, value, offset, limit, sort}, 60);
+    async getTileSection(type, value, offset, limit, sort, profile) {
+        return await this.request({action: 'get-tile-section', type, value, offset, limit, sort, profile}, 60);
     }
 
-    async getTileBook(bookUid) {
-        return await this.request({action: 'get-tile-book', bookUid}, 120);
+    async getTileBook(bookUid, profile) {
+        return await this.request({action: 'get-tile-book', bookUid, profile}, 120);
+    }
+
+    //профили пользователя (без авторизации)
+    async listUserProfiles() {
+        return await this.request({action: 'list-user-profiles'}, 10);
+    }
+
+    async getUserData(profile) {
+        return await this.request({action: 'get-user-data', profile}, 10);
+    }
+
+    async setUserRating(profile, bookUid, rate) {
+        return await this.request({action: 'set-user-rating', profile, bookUid, rate}, 10);
+    }
+
+    async setUserReview(profile, bookUid, text) {
+        return await this.request({action: 'set-user-review', profile, bookUid, text}, 15);
+    }
+
+    async toggleRead(profile, bookUid) {
+        return await this.request({action: 'toggle-read', profile, bookUid}, 10);
+    }
+
+    //kind: book|author|series
+    async ignoreItem(profile, kind, value, meta) {
+        return await this.request({action: 'ignore-item', profile, kind, value, meta}, 10);
+    }
+
+    async removeIgnore(profile, kind, key) {
+        return await this.request({action: 'remove-ignore', profile, kind, key}, 10);
+    }
+
+    async toggleFeed(profile, feedId) {
+        return await this.request({action: 'toggle-feed', profile, feedId}, 10);
     }
 
     async getBookCovers(bookUids) {

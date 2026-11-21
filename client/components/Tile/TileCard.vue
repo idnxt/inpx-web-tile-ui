@@ -6,6 +6,7 @@
                 <i class="la la-book text-grey-5" style="font-size: 40px" />
             </div>
             <div v-if="label" class="tile-label">{{ label }}</div>
+            <div v-if="read" class="tile-read-badge" :class="{'tile-read-badge-up': !!label}"><i class="la la-check" /> прочитано</div>
         </div>
         <div class="tile-meta">
             <div class="tile-title">{{ book.title }}</div>
@@ -37,6 +38,7 @@ class TileCard {
         cover: {type: String, default: ''},
         label: {type: String, default: ''},
         link: {type: String, default: ''},
+        read: {type: Boolean, default: false},
     };
 
     get authorName() {
@@ -93,6 +95,22 @@ export default vueComponent(TileCard);
     display: flex;
     justify-content: center;
     align-items: center;
+}
+
+.tile-read-badge {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    background: rgba(27, 94, 32, 0.85);
+    color: #ffffff;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 0 6px 0 0;
+    pointer-events: none;
+}
+
+.tile-read-badge-up {
+    bottom: 20px;
 }
 
 .tile-label {

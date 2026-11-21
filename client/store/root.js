@@ -8,7 +8,10 @@ const state = {
         expandedSeries: [],
 
         defaultsSet: false,
-        
+
+        //tile ui: текущий профиль пользователя (без авторизации)
+        tileProfile: '',
+
         //uiDefaults
         limit: 20,
         downloadAsZip: false,

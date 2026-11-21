@@ -33,6 +33,7 @@ const ReviewsReader = require('./ReviewsReader');
 const AuthorBioReader = require('./AuthorBioReader');
 
 const Favorites = require('./Favorites');
+const UserData = require('./UserData');
 
 //server states
 const ssNormal = 'normal';
@@ -717,12 +718,20 @@ class WebWorker {
         }
     }
 
-    async getTileHome(seed) {
+    async getTileHome(seed, profile) {
         this.checkMyState();
 
         seed = (parseInt(seed, 10) || 0) >>> 0;
 
         const {pools, authors} = await this.getTilePools();
+
+        //профиль: игнор книг/авторов/серий и отключённые ленты
+        let ud = null;
+        if (profile) {
+            const user = new UserData(this.config);
+            ud = await user.getData(profile);
+        }
+        const sets = ud ? this.tileIgnoredSets(ud) : null;
 
         //детерминированный выбор из пулов: seed + ключ ленты
         const seedFor = (key) => mulberry32(seed ^ stringHash(key));
@@ -856,19 +865,54 @@ class WebWorker {
         const rowById = new Map(bookRows.map((r) => [r.id, r]));
         const getRow = (b) => (rowById.get(b.id) || b);
 
-        return {
+        const keep = (b) => (!sets || !this.tileBookIgnored(sets, b));
+        const keepList = (arr) => (sets ? arr.filter(keep) : arr);
+        const keepSeries = (c) => (!sets || (!sets.series.has((c.series || '').toLowerCase()) && keep(c.book)));
+
+        const result = {
             seed,
-            new: newBooks.map(getRow),
-            top: topBooks.map(getRow),
-            seriesNew: seriesNew.map((c) => ({series: c.series, count: c.count, book: getRow(c.book)})),
-            seriesTop: seriesTop.map((c) => ({series: c.series, count: c.count, book: getRow(c.book)})),
-            years: yearFeeds.map((f) => ({year: f.year, books: f.books.map(getRow)})),
-            genres: genreFeeds,
-            authors: authorCards.map((c) => ({
-                id: c.id, name: c.name, avg: c.avg, count: c.count,
-                book: (rowById.get(c.bookId) || null),
-            })),
+            new: keepList(newBooks.map(getRow)),
+            top: keepList(topBooks.map(getRow)),
+            seriesNew: seriesNew.filter((c) => keepSeries(c)).map((c) => ({series: c.series, count: c.count, book: getRow(c.book)})),
+            seriesTop: seriesTop.filter((c) => keepSeries(c)).map((c) => ({series: c.series, count: c.count, book: getRow(c.book)})),
+            years: yearFeeds.map((f) => ({year: f.year, books: keepList(f.books.map(getRow))})),
+            genres: genreFeeds.map((f) => ({...f, new: keepList(f.new.map(getRow)), best: keepList(f.best.map(getRow))})),
+            authors: authorCards
+                .filter((c) => (!sets || !sets.authors.has(String(c.id))) && keep(rowById.get(c.bookId)))
+                .map((c) => ({
+                    id: c.id, name: c.name, avg: c.avg, count: c.count,
+                    book: (rowById.get(c.bookId) || null),
+                })),
         };
+
+        if (ud) {
+            result.profile = profile;
+            result.readUids = Object.keys(ud.read);
+            result.disabledFeeds = ud.disabledFeeds.slice();
+        }
+
+        return result;
+    }
+
+    //наборы игнорируемых книг/авторов/серий профиля
+    tileIgnoredSets(ud) {
+        return {
+            uids: new Set(ud.ignored.books.map((b) => b.uid)),
+            authors: new Set(ud.ignored.authors.map((a) => String(a.id))),
+            series: new Set(ud.ignored.series.map((s) => (s.name || '').toLowerCase())),
+        };
+    }
+
+    //книга под игнором: по uid, первому автору или серии
+    tileBookIgnored(sets, b) {
+        if (!b)
+            return true;
+        if (sets.uids.has(b._uid))
+            return true;
+        if (b.authorId && sets.authors.has(String(b.authorId)))
+            return true;
+        const s = (b.series || '').trim().toLowerCase();
+        return !!s && sets.series.has(s);
     }
 
     tileSortRows(rows, sort) {
@@ -934,6 +978,7 @@ class WebWorker {
 
         const type = params.type;
         const value = params.value;
+        const profile = params.profile;
         const offset = parseInt(params.offset, 10) || 0;
         let limit = parseInt(params.limit, 10) || 50;
         if (limit > 500)
@@ -945,12 +990,30 @@ class WebWorker {
         let total = 0;
         const meta = {type, value};
 
+        //профиль: игнор книг/авторов/серий (прямой переход по поиску остаётся)
+        let ud = null;
+        if (profile) {
+            const user = new UserData(this.config);
+            ud = await user.getData(profile);
+        }
+        const sets = ud ? this.tileIgnoredSets(ud) : null;
+        const applyIgnore = async(rows) => {
+            if (!sets || !rows.length)
+                return rows;
+            await this.addAuthorIds(rows);
+            return rows.filter((b) => !this.tileBookIgnored(sets, b));
+        };
+
         if (type === 'genre') {
             const ids = await this.dbSearcher.sortedBookIds({genre: value}, (sort === 'rate' ? 'rate' : 'new'));
             total = ids.length;
             const slice = Array.from(ids.slice(offset, offset + limit));
             if (slice.length)
                 books = await db.select({table: 'book', where: `@@id(${db.esc(slice)})`});
+            if (sets && books.length) {
+                //фильтр по странице: total при игноре приблизительный
+                books = await applyIgnore(books);
+            }
         } else if (type === 'author') {
             //клиент передаёт id автора (строка), если не число — имя
             const authorId = /^\d+$/.test(value) ? parseInt(value, 10) : '';
@@ -973,21 +1036,40 @@ class WebWorker {
                     allFeedBooks.push(...f.books);
                 allFeedBooks.push(...noSeries);
                 await this.addAuthorIds(allFeedBooks);
+
+                if (sets) {
+                    //исключаем ленты и книги под игнором
+                    meta.seriesFeeds = meta.seriesFeeds
+                        .filter((f) => !sets.series.has((f.series || '').toLowerCase()))
+                        .map((f) => ({...f, books: f.books.filter((b) => !this.tileBookIgnored(sets, b))}))
+                        .filter((f) => f.books.length);
+                    meta.noSeries = noSeries.filter((b) => !this.tileBookIgnored(sets, b));
+                }
             } else {
                 books = this.tileSortRows(res.books, sort);
+                if (sets)
+                    books = await applyIgnore(books);
                 total = books.length;
                 books = books.slice(offset, offset + limit);
             }
         } else if (type === 'series') {
             const res = await this.dbSearcher.getSeriesBookList(value);
             books = this.tileSortRows(res.books, (sort === 'new' || sort === 'rate' || sort === 'year' ? sort : 'serno'));
+            if (sets)
+                books = await applyIgnore(books);
             total = books.length;
             books = books.slice(offset, offset + limit);
         } else if (type === 'year') {
             const {pools} = await this.getTilePools();
             const arr = pools.years[value] || [];
-            books = arr.slice(offset, offset + limit);
-            total = arr.length;
+            if (sets) {
+                const filtered = await applyIgnore(arr);
+                books = filtered.slice(offset, offset + limit);
+                total = filtered.length;
+            } else {
+                books = arr.slice(offset, offset + limit);
+                total = arr.length;
+            }
         } else {
             throw new Error(`unknown section type: ${type}`);
         }
@@ -996,7 +1078,7 @@ class WebWorker {
         return Object.assign({books, total}, meta);
     }
 
-    async getTileBook(bookUid) {
+    async getTileBook(bookUid, profile) {
         this.checkMyState();
 
         const book = await this.getBookRecord(bookUid);
@@ -1012,7 +1094,77 @@ class WebWorker {
             const res = await this.dbSearcher.getSeriesBookList(series);
             result.seriesBooks = this.lightSeriesBooks(res.books);
         }
+
+        if (profile) {
+            const user = new UserData(this.config);
+            const ud = await user.getData(profile);
+            if (ud)
+                result.user = {
+                    read: !!ud.read[bookUid],
+                    rating: (parseInt(ud.ratings[bookUid], 10) || 0),
+                    review: (ud.reviews[bookUid] || ''),
+                };
+        }
+
         return result;
+    }
+
+    //профили пользователя (без авторизации)
+    async listUserProfiles() {
+        this.checkMyState();
+
+        const user = new UserData(this.config);
+        return {profiles: await user.listProfiles()};
+    }
+
+    async getUserData(profile) {
+        this.checkMyState();
+
+        const user = new UserData(this.config);
+        const d = await user.getData(profile);
+        return {profile, data: d};
+    }
+
+    async setUserRating(profile, bookUid, rate) {
+        this.checkMyState();
+
+        const user = new UserData(this.config);
+        return await user.setRating(profile, bookUid, rate);
+    }
+
+    async setUserReview(profile, bookUid, text) {
+        this.checkMyState();
+
+        const user = new UserData(this.config);
+        return await user.setReview(profile, bookUid, text);
+    }
+
+    async toggleRead(profile, bookUid) {
+        this.checkMyState();
+
+        const user = new UserData(this.config);
+        return await user.toggleRead(profile, bookUid);
+    }
+
+    async ignoreItem(profile, kind, value, meta) {
+        this.checkMyState();
+
+        const user = new UserData(this.config);
+        return await user.ignoreItem(profile, kind, value, meta);
+    }
+
+    async removeIgnore(profile, kind, key) {
+        this.checkMyState();
+
+        const user = new UserData(this.config);
+        return await user.removeIgnore(profile, kind, key);
+    }
+
+    async toggleFeed(profile, feedId) {
+        this.checkMyState();
+
+        const user = new UserData(this.config);
+        return await user.toggleFeed(profile, feedId);
     }
 
     async getBookCovers(bookUids) {

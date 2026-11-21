@@ -6,6 +6,7 @@ const TileHome = () => import('./components/Tile/TileHome.vue');
 const TileSection = () => import('./components/Tile/TileSection.vue');
 const TileBook = () => import('./components/Tile/TileBook.vue');
 const TileSearch = () => import('./components/Tile/TileSearch.vue');
+const TileSettings = () => import('./components/Tile/TileSettings.vue');
 
 const myRoutes = [
     ['/', Search],
@@ -16,6 +17,7 @@ const myRoutes = [
     ['/extended', Search],
     ['/tile', TileHome],
     ['/tile/search', TileSearch],
+    ['/tile/settings', TileSettings],
     ['/tile/section/:type/:value', TileSection],
     ['/tile/book/:uid', TileBook],
     ['/:pathMatch(.*)*', null, null, '/'],

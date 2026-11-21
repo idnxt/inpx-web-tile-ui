@@ -142,6 +142,22 @@ class WebSocketController {
                     await this.getTileBook(req, ws); break;
                 case 'get-covers':
                     await this.getCovers(req, ws); break;
+                case 'list-user-profiles':
+                    await this.listUserProfiles(req, ws); break;
+                case 'get-user-data':
+                    await this.getUserData(req, ws); break;
+                case 'set-user-rating':
+                    await this.setUserRating(req, ws); break;
+                case 'set-user-review':
+                    await this.setUserReview(req, ws); break;
+                case 'toggle-read':
+                    await this.toggleRead(req, ws); break;
+                case 'ignore-item':
+                    await this.ignoreItem(req, ws); break;
+                case 'remove-ignore':
+                    await this.removeIgnore(req, ws); break;
+                case 'toggle-feed':
+                    await this.toggleFeed(req, ws); break;
 
                 case 'get-inpx-file':
                     await this.getInpxFile(req, ws); break;
@@ -443,7 +459,7 @@ class WebSocketController {
     }
 
     async getTileHome(req, ws) {
-        const result = await this.webWorker.getTileHome(req.seed);
+        const result = await this.webWorker.getTileHome(req.seed, req.profile);
 
         this.send(result, req, ws);
     }
@@ -463,7 +479,7 @@ class WebSocketController {
         if (!utils.hasProp(req, 'bookUid'))
             throw new Error(`bookUid is empty`);
 
-        const result = await this.webWorker.getTileBook(req.bookUid);
+        const result = await this.webWorker.getTileBook(req.bookUid, req.profile);
 
         this.send(result, req, ws);
     }
@@ -477,6 +493,92 @@ class WebSocketController {
         const covers = await this.webWorker.getBookCovers(req.bookUids);
 
         this.send({covers}, req, ws);
+    }
+
+    //профили пользователя (без авторизации)
+    async listUserProfiles(req, ws) {
+        const result = await this.webWorker.listUserProfiles();
+
+        this.send(result, req, ws);
+    }
+
+    async getUserData(req, ws) {
+        if (!req.profile)
+            throw new Error(`profile is empty`);
+
+        const result = await this.webWorker.getUserData(req.profile);
+
+        this.send(result, req, ws);
+    }
+
+    async setUserRating(req, ws) {
+        if (!req.profile)
+            throw new Error(`profile is empty`);
+        if (!utils.hasProp(req, 'bookUid'))
+            throw new Error(`bookUid is empty`);
+
+        const result = await this.webWorker.setUserRating(req.profile, req.bookUid, req.rate);
+
+        this.send(result, req, ws);
+    }
+
+    async setUserReview(req, ws) {
+        if (!req.profile)
+            throw new Error(`profile is empty`);
+        if (!utils.hasProp(req, 'bookUid'))
+            throw new Error(`bookUid is empty`);
+
+        const result = await this.webWorker.setUserReview(req.profile, req.bookUid, req.text);
+
+        this.send(result, req, ws);
+    }
+
+    async toggleRead(req, ws) {
+        if (!req.profile)
+            throw new Error(`profile is empty`);
+        if (!utils.hasProp(req, 'bookUid'))
+            throw new Error(`bookUid is empty`);
+
+        const result = await this.webWorker.toggleRead(req.profile, req.bookUid);
+
+        this.send(result, req, ws);
+    }
+
+    async ignoreItem(req, ws) {
+        if (!req.profile)
+            throw new Error(`profile is empty`);
+        if (!req.kind)
+            throw new Error(`kind is empty`);
+        if (!req.value)
+            throw new Error(`value is empty`);
+
+        const result = await this.webWorker.ignoreItem(req.profile, req.kind, req.value, req.meta);
+
+        this.send(result, req, ws);
+    }
+
+    async removeIgnore(req, ws) {
+        if (!req.profile)
+            throw new Error(`profile is empty`);
+        if (!req.kind)
+            throw new Error(`kind is empty`);
+        if (!req.key)
+            throw new Error(`key is empty`);
+
+        const result = await this.webWorker.removeIgnore(req.profile, req.kind, req.key);
+
+        this.send(result, req, ws);
+    }
+
+    async toggleFeed(req, ws) {
+        if (!req.profile)
+            throw new Error(`profile is empty`);
+        if (!req.feedId)
+            throw new Error(`feedId is empty`);
+
+        const result = await this.webWorker.toggleFeed(req.profile, req.feedId);
+
+        this.send(result, req, ws);
     }
 
 }
