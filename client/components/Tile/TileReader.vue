@@ -146,6 +146,9 @@ class TileReader {
     sectionHeights = [];
     touchX = 0;
     touchY = 0;
+    touching = false;
+    touchEndTimer = null;
+    lastScrollTop = 0;
 
     scrollSaveTimer = null;
     lastOffsetUpdate = 0;
@@ -301,7 +304,8 @@ class TileReader {
     }
 
     //---авто-скрытие интерфейса---------------------------------------------------
-    //интерфейс показывается ТОЛЬКО при движении мыши (и при касании на тач-устройствах);
+    //интерфейс показывается ТОЛЬКО при движении мыши
+    //и при прокрутке вниз на тач-устройствах;
     //прокрутка колесом и клавиатура показ не запускают
 
     showUi() {
@@ -354,6 +358,7 @@ class TileReader {
         this.offsetFrac = 0;
         this.sectionTops = [];
         this.sectionHeights = [];
+        this.lastScrollTop = 0;
         this.downloadLoaded = 0;
         this.downloadTotal = 0;
 
@@ -537,6 +542,11 @@ class TileReader {
         if (!el)
             return;
 
+        //на тач-устройствах показываем интерфейс при прокрутке вниз
+        if (this.touching && el.scrollTop > this.lastScrollTop)
+            this.showUi();
+        this.lastScrollTop = el.scrollTop;
+
         const now = Date.now();
         if (now - this.lastOffsetUpdate > 200) {
             this.lastOffsetUpdate = now;
@@ -642,15 +652,26 @@ class TileReader {
     }
 
     onTouchStart(e) {
+        if (this.touchEndTimer) {
+            clearTimeout(this.touchEndTimer);
+            this.touchEndTimer = null;
+        }
         const t = e.touches[0];
         if (t) {
             this.touchX = t.clientX;
             this.touchY = t.clientY;
         }
-        this.onUiActivity();
+        this.touching = true;
     }
 
     onTouchEnd(e) {
+        //даём время на инерционную прокрутку после отрыва пальца
+        if (this.touchEndTimer)
+            clearTimeout(this.touchEndTimer);
+        this.touchEndTimer = setTimeout(() => {
+            this.touchEndTimer = null;
+            this.touching = false;
+        }, 600);
         if (this.mode !== 'page' || this.phase !== 'ready')
             return;
         const t = e.changedTouches[0];
