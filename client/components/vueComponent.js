@@ -42,7 +42,7 @@ export default function(componentClass) {
                 }
             } else if ( ['beforeCreate', 'created', 'beforeMount', 'mounted', 'beforeUpdate', 'updated', 'activated',
                         'deactivated', 'beforeUnmount', 'unmounted', 'errorCaptured', 'renderTracked', 'renderTriggered',
-                        'setup'].includes(method) ) {//life cycle hooks
+                        'setup', 'beforeRouteEnter', 'beforeRouteLeave', 'afterRouteLeave'].includes(method) ) {//life cycle hooks
                 if (!comp[method])
                     comp[method] = obj[method];
             } else if (method !== 'constructor') {//usual

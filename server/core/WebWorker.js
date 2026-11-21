@@ -1103,6 +1103,7 @@ class WebWorker {
                     read: !!ud.read[bookUid],
                     rating: (parseInt(ud.ratings[bookUid], 10) || 0),
                     review: (ud.reviews[bookUid] || ''),
+                    progress: (ud.progress[bookUid] || null),
                 };
         }
 
@@ -1144,6 +1145,13 @@ class WebWorker {
 
         const user = new UserData(this.config);
         return await user.toggleRead(profile, bookUid);
+    }
+
+    async setUserProgress(profile, bookUid, progress) {
+        this.checkMyState();
+
+        const user = new UserData(this.config);
+        return await user.setProgress(profile, bookUid, progress);
     }
 
     async ignoreItem(profile, kind, value, meta) {

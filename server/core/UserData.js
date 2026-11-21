@@ -34,6 +34,7 @@ class UserData {
                 series: [],     //{name, count}
             },
             disabledFeeds: [],  //id лент
+            progress: {},       //uid -> {section, total, frac, time} — прогресс читалки
         };
     }
 
@@ -49,6 +50,22 @@ class UserData {
         e.ignored.authors = Array.isArray(d.ignored?.authors) ? d.ignored.authors : [];
         e.ignored.series = Array.isArray(d.ignored?.series) ? d.ignored.series : [];
         e.disabledFeeds = Array.isArray(d.disabledFeeds) ? d.disabledFeeds : [];
+
+        //битые записи прогресса отбрасываем, валидные приводим к единому виду
+        if (d.progress && typeof d.progress === 'object') {
+            for (const [uid, p] of Object.entries(d.progress)) {
+                const section = parseInt(p?.section, 10);
+                const total = parseInt(p?.total, 10);
+                if (uid && !isNaN(section) && !isNaN(total) && section > 0 && total > 0) {
+                    e.progress[uid] = {
+                        section,
+                        total,
+                        frac: Math.max(0, Math.min(1, parseFloat(p.frac) || 0)),
+                        time: (typeof p.time === 'string' ? p.time : ''),
+                    };
+                }
+            }
+        }
 
         return e;
     }
@@ -225,6 +242,22 @@ class UserData {
             const before = list.length;
             list.splice(0, list.length, ...list.filter((x) => !pred(x)));
             return {removed: (list.length !== before)};
+        });
+    }
+
+    //прогресс чтения: {section, total, frac} — читалка шлёт при выходе
+    setProgress(profile, bookUid, p) {
+        if (!bookUid)
+            throw new Error('invalid book uid');
+
+        p = (p && typeof p === 'object') ? p : {};
+        const section = Math.max(1, parseInt(p.section, 10) || 1);
+        const total = Math.max(1, parseInt(p.total, 10) || 1);
+        const frac = Math.max(0, Math.min(1, parseFloat(p.frac) || 0));
+
+        return this._mutate(profile, (d) => {
+            d.progress[bookUid] = {section, total, frac, time: (new Date()).toISOString()};
+            return {progress: d.progress[bookUid]};
         });
     }
 

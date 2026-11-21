@@ -301,6 +301,11 @@ class Api {
         return await this.request({action: 'toggle-read', profile, bookUid}, 10);
     }
 
+    //прогресс чтения: {section, total, frac}
+    async setUserProgress(profile, bookUid, progress) {
+        return await this.request({action: 'set-user-progress', profile, bookUid, progress}, 10);
+    }
+
     //kind: book|author|series
     async ignoreItem(profile, kind, value, meta) {
         return await this.request({action: 'ignore-item', profile, kind, value, meta}, 10);

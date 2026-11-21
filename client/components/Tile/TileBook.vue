@@ -61,7 +61,8 @@
                     <span v-if="book.serno" class="text-grey-7">{{ book.serno }}</span>
                 </div>
                 <div class="row q-mt-lg">
-                    <DivBtn size="32" icon="la la-download" :disabled="loading" @meClick="download">Скачать</DivBtn>
+                    <DivBtn size="32" icon="la la-book-reader" :disabled="loading" @meClick="startRead">Читать</DivBtn>
+                    <DivBtn size="32" class="q-ml-sm" icon="la la-download" :disabled="loading" @meClick="download">Скачать</DivBtn>
                     <DivBtn
                         size="32"
                         class="q-ml-sm"
@@ -76,6 +77,10 @@
                         Задать профиль в настройках, чтобы отмечать прочитанные книги, ставить оценки и писать отзывы
                     </div>
                     <template v-else>
+                        <div v-if="user.progress" class="tile-block-note q-mt-sm">
+                            Прочитано: <b>{{ progressPercent }}%</b> — раздел {{ user.progress.section }} из {{ user.progress.total }}.
+                            Нажмите «Читать», чтобы продолжить
+                        </div>
                         <div class="row items-center q-mt-sm">
                             <span class="text-grey-7 q-mr-sm">Моя оценка:</span>
                             <span v-if="user.rating" class="q-mr-sm"><TileStars :rating="user.rating" :size="14" /></span>
@@ -146,6 +151,7 @@ import LoadingMessage from '../Search/LoadingMessage/LoadingMessage.vue';
 import DivBtn from '../share/DivBtn.vue';
 import TileStars from './TileStars.vue';
 import TileSearchBar from './TileSearchBar.vue';
+import {saveMeta} from './reader/readerStorage';
 import {buildInfoList} from '../../../server/core/book/bookInfoMapping';
 
 const componentOptions = {
@@ -197,6 +203,13 @@ class TileBook {
         return (this.$store.state.settings.tileProfile || '');
     }
 
+    get progressPercent() {
+        const p = this.user.progress;
+        if (!p || !p.total)
+            return 0;
+        return Math.min(100, Math.round(((p.section - 1 + (p.frac || 0)) / p.total) * 100));
+    }
+
     created() {
         this.api = this.$root.api;
     }
@@ -226,7 +239,7 @@ class TileBook {
         this.reviewsLoading = false;
         this.reviewsError = '';
         this.reviews = {declaredCount: 0, sum: 0, foundCount: 0, reviews: []};
-        this.user = {read: false, rating: 0, review: ''};
+        this.user = {read: false, rating: 0, review: '', progress: null};
         this.reviewText = '';
 
         const token = ++this.loadToken;
@@ -297,6 +310,23 @@ class TileBook {
             this.$root.stdDialog.alert(e.message, 'Ошибка');
         } finally {
             this.loadingMessage = '';
+        }
+    }
+
+    //читалка: книга загружается на устройство целиком, читается офлайн
+    async startRead() {
+        try {
+            //читалке нужны название/автор/формат без обращения к серверу
+            await saveMeta(this.book._uid, {
+                uid: this.book._uid,
+                title: this.book.title,
+                author: this.book.author,
+                series: this.book.series,
+                ext: this.book.ext,
+            });
+            this.$router.push(`/tile/reader/${encodeURIComponent(this.book._uid)}`);
+        } catch (e) {
+            this.$root.stdDialog.alert(e.message, 'Ошибка');
         }
     }
 

@@ -152,6 +152,8 @@ class WebSocketController {
                     await this.setUserReview(req, ws); break;
                 case 'toggle-read':
                     await this.toggleRead(req, ws); break;
+                case 'set-user-progress':
+                    await this.setUserProgress(req, ws); break;
                 case 'ignore-item':
                     await this.ignoreItem(req, ws); break;
                 case 'remove-ignore':
@@ -540,6 +542,17 @@ class WebSocketController {
             throw new Error(`bookUid is empty`);
 
         const result = await this.webWorker.toggleRead(req.profile, req.bookUid);
+
+        this.send(result, req, ws);
+    }
+
+    async setUserProgress(req, ws) {
+        if (!req.profile)
+            throw new Error(`profile is empty`);
+        if (!utils.hasProp(req, 'bookUid'))
+            throw new Error(`bookUid is empty`);
+
+        const result = await this.webWorker.setUserProgress(req.profile, req.bookUid, req.progress);
 
         this.send(result, req, ws);
     }

@@ -86,6 +86,48 @@ test('прочитано: отметить и снять', async () => {
     } finally { await cleanup(dir); resetSingletons(); }
 });
 
+test('прогресс чтения: сохранить/перезаписать/зажать значения', async () => {
+    const dir = await makeTmpDir();
+    try {
+        resetSingletons();
+        const user = new UserData(makeConfig(dir));
+
+        const res = await user.setProgress('p1', 'uid-a', {section: 10, total: 100, frac: 0.5});
+        assert.strictEqual(res.progress.section, 10);
+        assert.strictEqual(res.progress.total, 100);
+        assert.strictEqual(res.progress.frac, 0.5);
+        assert.ok(res.progress.time);
+
+        let d = await user.getData('p1');
+        assert.deepStrictEqual(d.progress['uid-a'], res.progress);
+
+        //перезаписать
+        await user.setProgress('p1', 'uid-a', {section: 20, total: 100, frac: 0.25});
+        d = await user.getData('p1');
+        assert.strictEqual(d.progress['uid-a'].section, 20);
+
+        //зажать: section < 1, frac вне 0..1, битый total
+        await user.setProgress('p1', 'uid-b', {section: -5, total: 50, frac: 9});
+        d = await user.getData('p1');
+        assert.deepStrictEqual(d.progress['uid-b'], {section: 1, total: 50, frac: 1, time: d.progress['uid-b'].time});
+
+        //битые значения — значения по умолчанию
+        await user.setProgress('p1', 'uid-c', {section: 'x', total: 'y'});
+        d = await user.getData('p1');
+        assert.strictEqual(d.progress['uid-c'].section, 1);
+        assert.strictEqual(d.progress['uid-c'].total, 1);
+
+        //несуществующий uid — ошибка
+        assert.throws(() => user.setProgress('p1', '', {section: 1, total: 2}), /invalid book uid/);
+
+        //прогресс не пересекается с прочими данными
+        await user.toggleRead('p1', 'uid-a');
+        d = await user.getData('p1');
+        assert.ok(d.read['uid-a']);
+        assert.strictEqual(d.progress['uid-a'].section, 20);
+    } finally { await cleanup(dir); resetSingletons(); }
+});
+
 test('игнор книги/автора/серии: добавить/дубликат/удалить', async () => {
     const dir = await makeTmpDir();
     try {
