@@ -29,6 +29,14 @@
                                     </q-tooltip>
                                 </a>
 
+                                <DivBtn class="q-ml-sm text-grey-7 bg-cyan-1" :size="28" :icon-size="24" icon="la la-th" round @click.stop.prevent="openTileUi">
+                                    <template #tooltip>
+                                        <q-tooltip :delay="1500" anchor="bottom middle" content-style="font-size: 80%" max-width="400px">
+                                            Плиточный интерфейс
+                                        </q-tooltip>
+                                    </template>
+                                </DivBtn>
+
                                 <q-btn-toggle
                                     v-model="selectedList"
                                     class="q-ml-sm"
@@ -52,13 +60,6 @@
                                     <template #tooltip>
                                         <q-tooltip :delay="1500" anchor="bottom middle" content-style="font-size: 80%" max-width="400px">
                                             Памятка
-                                        </q-tooltip>
-                                    </template>
-                                </DivBtn>
-                                <DivBtn class="q-ml-sm text-grey-7 bg-cyan-1" :size="28" :icon-size="24" icon="la la-th" round @click.stop.prevent="openTileUi">
-                                    <template #tooltip>
-                                        <q-tooltip :delay="1500" anchor="bottom middle" content-style="font-size: 80%" max-width="400px">
-                                            Плиточный интерфейс
                                         </q-tooltip>
                                     </template>
                                 </DivBtn>

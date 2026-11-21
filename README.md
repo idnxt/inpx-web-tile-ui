@@ -1,6 +1,7 @@
 inpx-web
 ========
-Основано на оригинальном проекте [inpx-web](https://github.com/bookpauk/inpx-web) (автор — Book Pauk).
+Основано на оригинальном проекте [inpx-web](https://github.com/bookpauk/inpx-web) (автор — Book Pauk) и форке https://github.com/00svd00/inpx-web (автор - 00svd00).
+Форк inpx-web-tile-ui добавляет "плиточный" веб-интерфейс, кнопка на главной сверху, рядом с кнопкой "Новый поиск".
 
 Веб-сервер для поиска по .inpx-коллекции.
 
