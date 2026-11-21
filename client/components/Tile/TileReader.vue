@@ -10,6 +10,9 @@
                 <div class="col reader-title">
                     <div class="reader-title-name">{{ displayName }}</div>
                     <div v-if="displayAuthor" class="reader-title-author">{{ displayAuthor }}</div>
+                    <div v-if="phase === 'ready' && book" class="reader-title-pos">
+                        {{ sectionIndex + 1 }} / {{ book.total }} · {{ percent }}%
+                    </div>
                 </div>
                 <div class="row items-center no-wrap">
                     <DivBtn size="28" class="reader-font-btn" @meClick="changeFontSize(-1)">A−</DivBtn>
@@ -40,37 +43,19 @@
             </div>
         </div>
 
-        <template v-else-if="phase === 'ready' && book">
-            <!--режим прокрутки: все разделы одной лентой-->
-            <div v-if="mode === 'scroll'"
-                ref="contentScroll"
-                class="reader-content" :class="contentFontClass" :style="{fontSize: fontSize + 'px'}"
-                @scroll="onScrollContent" @click="onScrollTap"
-                @touchstart.passive="onTouchStart" @touchend="onTouchEnd">
-                <div class="reader-content-inner">
-                    <div v-for="(sec, i) in book.sections" :key="i" class="reader-section">
-                        <h2 v-if="sec.title" class="reader-section-title">{{ sec.title }}</h2>
-                        <div class="reader-section-html" v-html="sec.html" />
-                    </div>
+        <!--все разделы одной лентой; режим листания — шаги по страницам (экранам)-->
+        <div v-else-if="phase === 'ready' && book"
+            ref="content"
+            class="reader-content" :class="contentFontClass" :style="{fontSize: fontSize + 'px'}"
+            @scroll="onScrollContent" @click="onPageTap"
+            @touchstart.passive="onTouchStart" @touchend="onTouchEnd">
+            <div class="reader-content-inner">
+                <div v-for="(sec, i) in book.sections" :key="i" class="reader-section">
+                    <h2 v-if="sec.title" class="reader-section-title">{{ sec.title }}</h2>
+                    <div class="reader-section-html" v-html="sec.html" />
                 </div>
             </div>
-
-            <!--режим листания: страница = один раздел, навигация тапом по краям / свайпом / стрелками-->
-            <div v-else
-                ref="contentPage"
-                class="reader-content" :class="contentFontClass" :style="{fontSize: fontSize + 'px'}"
-                @scroll="onScrollContent" @click="onPageTap"
-                @touchstart.passive="onTouchStart" @touchend="onTouchEnd">
-                <div v-if="currentSection" class="reader-content-inner">
-                    <h2 v-if="currentSection.title" class="reader-section-title">{{ currentSection.title }}</h2>
-                    <div class="reader-section-html" v-html="currentSection.html" />
-                </div>
-            </div>
-
-            <div class="reader-hud-bottom" :class="{off: !uiVisible}">
-                <span class="reader-pos">{{ sectionIndex + 1 }} / {{ book.total }} · {{ percent }}%</span>
-            </div>
-        </template>
+        </div>
 
         <!--панель настроек-->
         <div v-if="panelOpen" class="reader-panel-backdrop" @click="closePanel" />
@@ -291,26 +276,16 @@ class TileReader {
     }
 
     setMode(m) {
-        if (m === this.mode || this.phase !== 'ready')
+        if (m === this.mode)
             return;
         this.mode = m;
         this.saveSettings();
-        this.$nextTick(() => this.onModeChanged());
-    }
-
-    onModeChanged() {
-        if (this.mode === 'scroll') {
-            this.computeMetrics();
-            this.restoreScroll();
-        } else {
-            this.restorePageScroll();
-        }
     }
 
     changeFontSize(delta) {
         this.fontSize = Math.max(12, Math.min(32, this.fontSize + delta * 2));
         this.saveSettings();
-        if (this.mode === 'scroll' && this.phase === 'ready')
+        if (this.phase === 'ready')
             this.$nextTick(() => this.computeMetrics());
     }
 
@@ -326,6 +301,8 @@ class TileReader {
     }
 
     //---авто-скрытие интерфейса---------------------------------------------------
+    //интерфейс показывается ТОЛЬКО при движении мыши (и при касании на тач-устройствах);
+    //прокрутка колесом и клавиатура показ не запускают
 
     showUi() {
         this.uiVisible = true;
@@ -419,12 +396,8 @@ class TileReader {
             this.phase = 'ready';
             this.showUi();
             this.$nextTick(() => {
-                if (this.mode === 'scroll') {
-                    this.computeMetrics();
-                    this.restoreScroll();
-                } else {
-                    this.restorePageScroll();
-                }
+                this.computeMetrics();
+                this.restoreScroll();
             });
         } catch (e) {
             if (token !== this.loadToken)
@@ -492,9 +465,9 @@ class TileReader {
 
     //---положение и прогресс------------------------------------------------------
 
-    //режим прокрутки: позиции и высоты всех разделов относительно контейнера
+    //позиции и высоты всех разделов относительно контейнера
     computeMetrics() {
-        const el = this.$refs.contentScroll;
+        const el = this.$refs.content;
         this.sectionTops = [];
         this.sectionHeights = [];
         if (!el)
@@ -506,25 +479,17 @@ class TileReader {
     }
 
     scrollAnchor() {
-        const el = this.$refs.contentScroll;
+        const el = this.$refs.content;
         return (el ? el.clientHeight * 0.3 : 0);
     }
 
     restoreScroll() {
-        const el = this.$refs.contentScroll;
+        const el = this.$refs.content;
         if (!el || !this.sectionTops.length)
             return;
         const i = Math.max(0, Math.min(this.sectionTops.length - 1, this.sectionIndex));
         const y = this.sectionTops[i] + (this.offsetFrac || 0) * (this.sectionHeights[i] || 0) - this.scrollAnchor();
         el.scrollTop = Math.max(0, y);
-    }
-
-    restorePageScroll() {
-        const el = this.$refs.contentPage;
-        if (!el)
-            return;
-        const max = Math.max(0, el.scrollHeight - el.clientHeight);
-        el.scrollTop = (this.offsetFrac || 0) * max;
     }
 
     makeProgress() {
@@ -568,30 +533,22 @@ class TileReader {
     }
 
     onScrollContent() {
-        const el = this.$refs.contentScroll || this.$refs.contentPage;
+        const el = this.$refs.content;
         if (!el)
             return;
-        this.onUiActivity();
 
         const now = Date.now();
         if (now - this.lastOffsetUpdate > 200) {
             this.lastOffsetUpdate = now;
-
-            if (this.mode === 'scroll') {
-                //текущий раздел — тот, что содержит точку 30% высоты вьюпорта
-                const y = el.scrollTop + el.clientHeight * 0.3;
-                let i = 0;
-                for (let k = 0; k < this.sectionTops.length; k++)
-                    if (y >= this.sectionTops[k])
-                        i = k;
-                this.sectionIndex = i;
-                const h = this.sectionHeights[i] || 1;
-                this.offsetFrac = Math.max(0, Math.min(1, (y - this.sectionTops[i]) / h));
-            } else {
-                //листание: доля прокрутки внутри страницы (раздела)
-                const max = el.scrollHeight - el.clientHeight;
-                this.offsetFrac = (max > 0 ? Math.max(0, Math.min(1, el.scrollTop / max)) : 0);
-            }
+            //текущий раздел — тот, что содержит точку 30% высоты вьюпорта
+            const y = el.scrollTop + el.clientHeight * 0.3;
+            let i = 0;
+            for (let k = 0; k < this.sectionTops.length; k++)
+                if (y >= this.sectionTops[k])
+                    i = k;
+            this.sectionIndex = i;
+            const h = this.sectionHeights[i] || 1;
+            this.offsetFrac = Math.max(0, Math.min(1, (y - this.sectionTops[i]) / h));
         }
 
         if (!this.scrollSaveTimer)
@@ -601,72 +558,85 @@ class TileReader {
             }, 2000);
     }
 
-    //режим листания: листаем разделы
-    goSection(i) {
-        if (!this.book || i < 0 || i >= this.book.total)
+    //---ввод: клавиши, тапы, свайпы---------------------------------------------
+    //«страница» = один экран (вьюпорт), строка — высота строки текста
+
+    movePage(d) {
+        const el = this.$refs.content;
+        if (!el)
             return;
-
-        this.saveProgressLocal();
-        this.sectionIndex = i;
-        this.offsetFrac = 0;
-        this.lastOffsetUpdate = 0;
-        const el = this.$refs.contentPage;
-        if (el)
-            el.scrollTop = 0;
-        this.showUi();
-        this.$nextTick(() => this.saveProgressLocal());
-    }
-
-    //режим прокрутки: прыжок к разделу
-    jumpToSection(i) {
-        if (!this.book || i < 0 || i >= this.book.total)
+        const ph = el.clientHeight;
+        if (!ph)
             return;
-        const el = this.$refs.contentScroll;
-        if (!el || !this.sectionTops.length)
+        const max = Math.max(0, el.scrollHeight - ph);
+        const cur = el.scrollTop;
+        //в режиме листания прыгаем на границу ближайшей страницы,
+        //в прокрутке — на полный экран от текущей позиции
+        const target = (this.mode === 'page')
+            ? (Math.round(cur / ph) + d) * ph
+            : cur + d * ph;
+        el.scrollTop = Math.max(0, Math.min(max, target));
+    }
+
+    moveLine(d) {
+        const el = this.$refs.content;
+        if (!el)
             return;
-        this.sectionIndex = i;
-        el.scrollTop = this.sectionTops[i];
-        this.showUi();
+        const lh = parseFloat(getComputedStyle(el).lineHeight);
+        const step = (isFinite(lh) && lh > 0) ? lh : this.fontSize * 1.65;
+        const max = Math.max(0, el.scrollHeight - el.clientHeight);
+        el.scrollTop = Math.max(0, Math.min(max, el.scrollTop + d * step));
     }
 
-    prevSection() {
-        if (this.mode === 'page')
-            this.goSection(this.sectionIndex - 1);
-        else
-            this.jumpToSection(this.sectionIndex - 1);
-    }
-
-    nextSection() {
-        if (this.mode === 'page')
-            this.goSection(this.sectionIndex + 1);
-        else
-            this.jumpToSection(this.sectionIndex + 1);
-    }
-
-    //---ввод: тапы, свайпы, клавиши--------------------------------------------------
-
-    onScrollTap() {
-        if (this.panelOpen)
+    onKeydown(e) {
+        if (this.panelOpen) {
+            if (e.key === 'Escape')
+                this.closePanel();
             return;
-        this.toggleUi();
+        }
+        if (this.phase !== 'ready')
+            return;
+        //клавиатура не показывает интерфейс
+        switch (e.key) {
+            case 'ArrowRight':
+            case 'PageDown':
+            case ' ':
+                e.preventDefault();
+                this.movePage(1);
+                break;
+            case 'ArrowLeft':
+            case 'PageUp':
+                e.preventDefault();
+                this.movePage(-1);
+                break;
+            case 'ArrowDown':
+                e.preventDefault();
+                this.moveLine(1);
+                break;
+            case 'ArrowUp':
+                e.preventDefault();
+                this.moveLine(-1);
+                break;
+        }
     }
 
+    //тап-зоны (режим листания): левая треть — назад, правая — дальше, центр — интерфейс
     onPageTap(e) {
-        if (this.panelOpen || this.phase !== 'ready')
+        if (this.mode !== 'page' || this.panelOpen || this.phase !== 'ready')
             return;
         const t = e.target;
         if (t && t.closest && t.closest('a'))
             return; //ссылки в тексте — не листаем
-        const el = this.$refs.contentPage;
+        const el = this.$refs.content;
         if (!el)
             return;
         const rect = el.getBoundingClientRect();
         const w = rect.width || 1;
         const x = e.clientX - rect.left;
         if (x < w * 0.3)
-            this.goSection(this.sectionIndex - 1);
+            this.movePage(-1);
         else if (x > w * 0.7)
-            this.goSection(this.sectionIndex + 1);
+            this.movePage(1);
         else
             this.toggleUi();
     }
@@ -691,32 +661,14 @@ class TileReader {
         //свайп: сильнее 60px и горизонталь доминирует
         if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) {
             if (dx < 0)
-                this.goSection(this.sectionIndex + 1);
+                this.movePage(1);
             else
-                this.goSection(this.sectionIndex - 1);
-        }
-    }
-
-    onKeydown(e) {
-        if (this.panelOpen) {
-            if (e.key === 'Escape')
-                this.closePanel();
-            return;
-        }
-        this.onUiActivity();
-        if (this.phase !== 'ready')
-            return;
-        if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') {
-            e.preventDefault();
-            this.nextSection();
-        } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
-            e.preventDefault();
-            this.prevSection();
+                this.movePage(-1);
         }
     }
 
     onResize() {
-        if (this.mode === 'scroll' && this.phase === 'ready')
+        if (this.phase === 'ready')
             this.computeMetrics();
     }
 
@@ -813,7 +765,7 @@ export default vueComponent(TileReader);
     --r-soft: #eaddbe;
 }
 
-/*верхний HUD: верхняя панель + линия прогресса, скрывается автоматически*/
+/*верхний HUD: верхняя панель + линия прогресса, показывается только при движении мыши*/
 .reader-hud-top {
     position: absolute;
     top: 0;
@@ -874,6 +826,15 @@ export default vueComponent(TileReader);
     text-overflow: ellipsis;
 }
 
+/*позиция в книге — в верхнем баре, после названия*/
+.reader-title-pos {
+    font-size: 11px;
+    color: var(--r-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .reader-font-btn {
     font-size: 12px;
 }
@@ -889,41 +850,12 @@ export default vueComponent(TileReader);
     transition: width 0.2s linear;
 }
 
-/*нижний HUD: позиция в книге, тоже скрывается*/
-.reader-hud-bottom {
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 10;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 10px 12px calc(10px + env(safe-area-inset-bottom)) 12px;
-    border-top: 1px solid var(--r-border);
-    background: var(--r-bar);
-    transition: transform 0.3s ease, opacity 0.3s ease;
-}
-
-.reader-hud-bottom.off {
-    transform: translateY(100%);
-    opacity: 0;
-    pointer-events: none;
-}
-
-.reader-pos {
-    font-size: 13px;
-    color: var(--r-muted);
-    text-align: center;
-    white-space: nowrap;
-}
-
-/*текст книги: отступы под HUD сверху и снизу*/
+/*текст книги: отступ сверху под HUD*/
 .reader-content {
     flex: 1;
     position: relative;
     overflow-y: auto;
-    padding: 70px 16px 72px 16px;
+    padding: 80px 16px 24px 16px;
     line-height: 1.65;
 }
 
