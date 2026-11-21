@@ -34,6 +34,8 @@ class UserData {
                 series: [],     //{name, count}
             },
             disabledFeeds: [],  //id лент
+            hideRead: false,    //скрывать прочитанные в лентах и жанровых списках
+            hideRated: false,   //скрывать оценённые в лентах и жанровых списках
             progress: {},       //uid -> {section, total, frac, time} — прогресс читалки
         };
     }
@@ -50,6 +52,8 @@ class UserData {
         e.ignored.authors = Array.isArray(d.ignored?.authors) ? d.ignored.authors : [];
         e.ignored.series = Array.isArray(d.ignored?.series) ? d.ignored.series : [];
         e.disabledFeeds = Array.isArray(d.disabledFeeds) ? d.disabledFeeds : [];
+        e.hideRead = !!d.hideRead;
+        e.hideRated = !!d.hideRated;
 
         //битые записи прогресса отбрасываем, валидные приводим к единому виду
         if (d.progress && typeof d.progress === 'object') {
@@ -275,6 +279,21 @@ class UserData {
             }
             d.disabledFeeds.push(feedId);
             return {disabled: true};
+        });
+    }
+
+    //скрывать прочитанные/оценённые книги в лентах и жанровых списках
+    toggleHideRead(profile) {
+        return this._mutate(profile, (d) => {
+            d.hideRead = !d.hideRead;
+            return {hideRead: d.hideRead};
+        });
+    }
+
+    toggleHideRated(profile) {
+        return this._mutate(profile, (d) => {
+            d.hideRated = !d.hideRated;
+            return {hideRated: d.hideRated};
         });
     }
 }

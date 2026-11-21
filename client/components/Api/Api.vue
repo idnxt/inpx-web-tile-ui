@@ -105,6 +105,11 @@ class Api {
         const settings = this.settings;
 
         this.accessToken = settings.accessToken;
+
+        //профиль по умолчанию — user (если пользователь не выбрал свой)
+        if (!settings.tileProfile) {
+            this.commit('setSettings', {tileProfile: 'user'});
+        }
     }
 
     async updateConfig() {
@@ -317,6 +322,22 @@ class Api {
 
     async toggleFeed(profile, feedId) {
         return await this.request({action: 'toggle-feed', profile, feedId}, 10);
+    }
+
+    async toggleHideRead(profile) {
+        return await this.request({action: 'toggle-hide-read', profile}, 10);
+    }
+
+    async toggleHideRated(profile) {
+        return await this.request({action: 'toggle-hide-rated', profile}, 10);
+    }
+
+    async getReadList(profile, offset, limit) {
+        return await this.request({action: 'get-read-list', profile, offset, limit}, 30);
+    }
+
+    async getRatedList(profile, offset, limit) {
+        return await this.request({action: 'get-rated-list', profile, offset, limit}, 30);
     }
 
     async getBookCovers(bookUids) {

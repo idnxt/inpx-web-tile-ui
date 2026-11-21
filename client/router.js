@@ -8,6 +8,7 @@ const TileBook = () => import('./components/Tile/TileBook.vue');
 const TileSearch = () => import('./components/Tile/TileSearch.vue');
 const TileSettings = () => import('./components/Tile/TileSettings.vue');
 const TileReader = () => import('./components/Tile/TileReader.vue');
+const TileUserList = () => import('./components/Tile/TileUserList.vue');
 
 const myRoutes = [
     ['/', Search],
@@ -19,6 +20,8 @@ const myRoutes = [
     ['/tile', TileHome],
     ['/tile/search', TileSearch],
     ['/tile/settings', TileSettings],
+    ['/tile/read', TileUserList],
+    ['/tile/rated', TileUserList],
     ['/tile/section/:type/:value', TileSection],
     ['/tile/book/:uid', TileBook],
     ['/tile/reader/:uid', TileReader],

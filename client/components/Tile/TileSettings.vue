@@ -71,6 +71,41 @@
             </div>
 
             <div class="tile-set-block">
+                <div class="tile-block-head">Книги в лентах</div>
+                <div class="tile-block-note">Скрытые книги не показываются в лентах на главной и в жанровых списках</div>
+                <template v-if="data && profile">
+                    <div class="row items-center tile-set-row" @click="toggleHide('read')">
+                        <div class="q-ml-xs" :class="data.hideRead ? 'la la-square text-primary' : 'la la-square-o text-grey-4'" />
+                        <span class="q-ml-sm">Скрывать прочитанные</span>
+                    </div>
+                    <div class="row items-center tile-set-row" @click="toggleHide('rated')">
+                        <div class="q-ml-xs" :class="data.hideRated ? 'la la-square text-primary' : 'la la-square-o text-grey-4'" />
+                        <span class="q-ml-sm">Скрывать оценённые</span>
+                    </div>
+                </template>
+                <div v-else class="tile-block-note q-mt-sm">
+                    Задайте профиль, чтобы настроить скрытие
+                </div>
+            </div>
+
+            <div class="tile-set-block">
+                <div class="tile-block-head">Мои списки</div>
+                <template v-if="data && profile">
+                    <a class="row items-center tile-set-row tile-list-link" href="#/tile/read">
+                        <i class="la la-check-circle q-ml-xs text-grey-6" />
+                        <span class="q-ml-sm">Прочитанные ({{ readCount }})</span>
+                    </a>
+                    <a class="row items-center tile-set-row tile-list-link" href="#/tile/rated">
+                        <i class="la la-star q-ml-xs text-grey-6" />
+                        <span class="q-ml-sm">Оценённые ({{ ratedCount }})</span>
+                    </a>
+                </template>
+                <div v-else class="tile-block-note q-mt-sm">
+                    Задайте профиль, чтобы вести списки
+                </div>
+            </div>
+
+            <div class="tile-set-block">
                 <div class="tile-block-head">Игнорируемые</div>
                 <div class="tile-block-note">Исключаются из лент, поиском найти можно</div>
                 <template v-if="data && profile">
@@ -139,6 +174,14 @@ class TileSettings {
     get disabledFeeds() {
         //id отключённых лент
         return new Set((this.data && this.data.disabledFeeds) || []);
+    }
+
+    get readCount() {
+        return (this.data ? Object.keys(this.data.read || {}).length : 0);
+    }
+
+    get ratedCount() {
+        return (this.data ? Object.keys(this.data.ratings || {}).length : 0);
     }
 
     baseFeeds = [
@@ -258,6 +301,23 @@ class TileSettings {
         }
     }
 
+    async toggleHide(kind) {
+        if (!this.profile) {
+            this.$root.stdDialog.alert('Сначала задайте профиль', 'Настройки');
+            return;
+        }
+
+        try {
+            if (kind === 'rated')
+                await this.api.toggleHideRated(this.profile);
+            else
+                await this.api.toggleHideRead(this.profile);
+            await this.loadData();
+        } catch (e) {
+            this.$root.stdDialog.alert(e.message, 'Ошибка');
+        }
+    }
+
     async removeIgnore(kind, key) {
         if (!this.profile)
             return;
@@ -339,6 +399,15 @@ a.tile-chip:hover {
 .tile-set-row {
     line-height: 22px;
     cursor: pointer;
+}
+
+.tile-list-link {
+    text-decoration: none;
+}
+
+a.tile-list-link:hover {
+    background: #f0f7ff;
+    border-radius: 4px;
 }
 
 .tile-set-row-sub {

@@ -237,6 +237,48 @@ test('недопустимое имя профиля: getData -> null, запи�
     } finally { await cleanup(dir); resetSingletons(); }
 });
 
+test('скрытие прочитанных/оценённых: переключатели и нормализация', async () => {
+    const dir = await makeTmpDir();
+    try {
+        resetSingletons();
+        const user = new UserData(makeConfig(dir));
+
+        //по умолчанию скрытие выключено
+        const d0 = await user.getData('p1');
+        assert.strictEqual(d0.hideRead, false);
+        assert.strictEqual(d0.hideRated, false);
+
+        assert.deepStrictEqual(await user.toggleHideRead('p1'), {hideRead: true});
+        assert.deepStrictEqual(await user.toggleHideRated('p1'), {hideRated: true});
+        assert.deepStrictEqual(await user.toggleHideRead('p1'), {hideRead: false});
+
+        const d = await user.getData('p1');
+        assert.strictEqual(d.hideRead, false);
+        assert.strictEqual(d.hideRated, true);
+
+        //значения переживают перезагрузку с диска
+        resetSingletons();
+        const user2 = new UserData(makeConfig(dir));
+        const d2 = await user2.getData('p1');
+        assert.strictEqual(d2.hideRated, true);
+        assert.strictEqual(d2.hideRead, false);
+    } finally { await cleanup(dir); resetSingletons(); }
+});
+
+test('скрытие: битый файл не ломает normalize', async () => {
+    const dir = await makeTmpDir();
+    try {
+        resetSingletons();
+        await fs.ensureDir(path.join(dir, 'userData'));
+        await fs.writeFile(path.join(dir, 'userData', 'p.json'), JSON.stringify({hideRead: 'yes', hideRated: null}));
+
+        const user = new UserData(makeConfig(dir));
+        const d = await user.getData('p');
+        assert.strictEqual(d.hideRead, true);
+        assert.strictEqual(d.hideRated, false);
+    } finally { await cleanup(dir); resetSingletons(); }
+});
+
 test('битый файл профиля -> пустые данные, не падает', async () => {
     const dir = await makeTmpDir();
     try {

@@ -9,8 +9,8 @@ const state = {
 
         defaultsSet: false,
 
-        //tile ui: текущий профиль пользователя (без авторизации)
-        tileProfile: '',
+        //tile ui: текущий профиль пользователя (без авторизации); по умолчанию user
+        tileProfile: 'user',
 
         //uiDefaults
         limit: 20,

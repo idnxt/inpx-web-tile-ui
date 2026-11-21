@@ -725,13 +725,14 @@ class WebWorker {
 
         const {pools, authors} = await this.getTilePools();
 
-        //профиль: игнор книг/авторов/серий и отключённые ленты
+        //профиль: игнор книг/авторов/серий, скрытие прочитанных/оценённых, отключённые ленты
         let ud = null;
         if (profile) {
             const user = new UserData(this.config);
             ud = await user.getData(profile);
         }
         const sets = ud ? this.tileIgnoredSets(ud) : null;
+        const hidden = ud ? this.tileHiddenUids(ud) : null;
 
         //детерминированный выбор из пулов: seed + ключ ленты
         const seedFor = (key) => mulberry32(seed ^ stringHash(key));
@@ -865,8 +866,14 @@ class WebWorker {
         const rowById = new Map(bookRows.map((r) => [r.id, r]));
         const getRow = (b) => (rowById.get(b.id) || b);
 
-        const keep = (b) => (!sets || !this.tileBookIgnored(sets, b));
-        const keepList = (arr) => (sets ? arr.filter(keep) : arr);
+        const keep = (b) => {
+            if (sets && this.tileBookIgnored(sets, b))
+                return false;
+            if (hidden && b && hidden.has(b._uid))
+                return false;
+            return true;
+        };
+        const keepList = (arr) => (sets || hidden ? arr.filter(keep) : arr);
         const keepSeries = (c) => (!sets || (!sets.series.has((c.series || '').toLowerCase()) && keep(c.book)));
 
         const result = {
@@ -913,6 +920,18 @@ class WebWorker {
             return true;
         const s = (b.series || '').trim().toLowerCase();
         return !!s && sets.series.has(s);
+    }
+
+    //uid книг, скрытых из лент по настройкам профиля (прочитанные/оценённые)
+    tileHiddenUids(ud) {
+        const s = new Set();
+        if (ud.hideRead)
+            for (const uid of Object.keys(ud.read))
+                s.add(uid);
+        if (ud.hideRated)
+            for (const uid of Object.keys(ud.ratings))
+                s.add(uid);
+        return s;
     }
 
     tileSortRows(rows, sort) {
@@ -997,6 +1016,7 @@ class WebWorker {
             ud = await user.getData(profile);
         }
         const sets = ud ? this.tileIgnoredSets(ud) : null;
+        const hidden = ud ? this.tileHiddenUids(ud) : null;
         const applyIgnore = async(rows) => {
             if (!sets || !rows.length)
                 return rows;
@@ -1014,6 +1034,8 @@ class WebWorker {
                 //фильтр по странице: total при игноре приблизительный
                 books = await applyIgnore(books);
             }
+            if (hidden && books.length)
+                books = books.filter((b) => !hidden.has(b._uid));
         } else if (type === 'author') {
             //клиент передаёт id автора (строка), если не число — имя
             const authorId = /^\d+$/.test(value) ? parseInt(value, 10) : '';
@@ -1173,6 +1195,79 @@ class WebWorker {
 
         const user = new UserData(this.config);
         return await user.toggleFeed(profile, feedId);
+    }
+
+    //скрывать прочитанные/оценённые в лентах и жанровых списках
+    async toggleHideRead(profile) {
+        this.checkMyState();
+
+        const user = new UserData(this.config);
+        return await user.toggleHideRead(profile);
+    }
+
+    async toggleHideRated(profile) {
+        this.checkMyState();
+
+        const user = new UserData(this.config);
+        return await user.toggleHideRated(profile);
+    }
+
+    //прочитанные профиля: по времени отметки, новые сверху
+    async getTileReadList(profile, offset, limit) {
+        this.checkMyState();
+
+        const user = new UserData(this.config);
+        const ud = await user.getData(profile);
+        if (!ud)
+            throw new Error('invalid profile name');
+
+        offset = Math.max(0, parseInt(offset, 10) || 0);
+        limit = Math.min(500, Math.max(1, parseInt(limit, 10) || 50));
+
+        const total = Object.keys(ud.read).length;
+        const uids = Object.entries(ud.read)
+            .sort((a, b) => ((a[1] > b[1]) ? -1 : (a[1] < b[1]) ? 1 : 0))
+            .slice(offset, offset + limit)
+            .map(([uid]) => uid);
+
+        const books = await this.getBooks(uids);
+        const byUid = new Map(books.map((b) => [b._uid, b]));
+        const rows = uids.map((uid) => byUid.get(uid)).filter(Boolean);
+        await this.addAuthorIds(rows);
+
+        return {
+            total,
+            books: rows.map((b) => ({...b, readTime: ud.read[b._uid]})),
+        };
+    }
+
+    //оценённые профиля: с оценкой и отзывом (если есть), по убыванию оценки
+    async getTileRatedList(profile, offset, limit) {
+        this.checkMyState();
+
+        const user = new UserData(this.config);
+        const ud = await user.getData(profile);
+        if (!ud)
+            throw new Error('invalid profile name');
+
+        offset = Math.max(0, parseInt(offset, 10) || 0);
+        limit = Math.min(500, Math.max(1, parseInt(limit, 10) || 50));
+
+        const total = Object.keys(ud.ratings).length;
+        const uids = Object.entries(ud.ratings)
+            .sort((a, b) => ((b[1] - a[1]) || ((a[0] > b[0]) ? 1 : (a[0] < b[0]) ? -1 : 0)))
+            .slice(offset, offset + limit)
+            .map(([uid]) => uid);
+
+        const books = await this.getBooks(uids);
+        const byUid = new Map(books.map((b) => [b._uid, b]));
+        const rows = uids.map((uid) => byUid.get(uid)).filter(Boolean);
+        await this.addAuthorIds(rows);
+
+        return {
+            total,
+            books: rows.map((b) => ({...b, rating: parseInt(ud.ratings[b._uid], 10) || 0, review: (ud.reviews[b._uid] || '')})),
+        };
     }
 
     async getBookCovers(bookUids) {

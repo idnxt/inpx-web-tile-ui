@@ -160,6 +160,14 @@ class WebSocketController {
                     await this.removeIgnore(req, ws); break;
                 case 'toggle-feed':
                     await this.toggleFeed(req, ws); break;
+                case 'toggle-hide-read':
+                    await this.toggleHideRead(req, ws); break;
+                case 'toggle-hide-rated':
+                    await this.toggleHideRated(req, ws); break;
+                case 'get-read-list':
+                    await this.getReadList(req, ws); break;
+                case 'get-rated-list':
+                    await this.getRatedList(req, ws); break;
 
                 case 'get-inpx-file':
                     await this.getInpxFile(req, ws); break;
@@ -590,6 +598,42 @@ class WebSocketController {
             throw new Error(`feedId is empty`);
 
         const result = await this.webWorker.toggleFeed(req.profile, req.feedId);
+
+        this.send(result, req, ws);
+    }
+
+    async toggleHideRead(req, ws) {
+        if (!req.profile)
+            throw new Error(`profile is empty`);
+
+        const result = await this.webWorker.toggleHideRead(req.profile);
+
+        this.send(result, req, ws);
+    }
+
+    async toggleHideRated(req, ws) {
+        if (!req.profile)
+            throw new Error(`profile is empty`);
+
+        const result = await this.webWorker.toggleHideRated(req.profile);
+
+        this.send(result, req, ws);
+    }
+
+    async getReadList(req, ws) {
+        if (!req.profile)
+            throw new Error(`profile is empty`);
+
+        const result = await this.webWorker.getTileReadList(req.profile, req.offset, req.limit);
+
+        this.send(result, req, ws);
+    }
+
+    async getRatedList(req, ws) {
+        if (!req.profile)
+            throw new Error(`profile is empty`);
+
+        const result = await this.webWorker.getTileRatedList(req.profile, req.offset, req.limit);
 
         this.send(result, req, ws);
     }

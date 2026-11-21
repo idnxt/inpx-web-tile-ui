@@ -17,6 +17,7 @@ class FakeDb {
         if (!where) return rows.slice();
 
         // поддержка @@hash('_uid', 'x') и @@hash('_uid', ['a','b'])
+        // esc(['a','b']) -> "'a,b'" (mson-массив в кавычках)
         const m = where.match(/@@hash\('([^']+)',\s*(.+?)\)$/);
         if (m) {
             const [, field, raw] = m;
@@ -25,17 +26,20 @@ class FakeDb {
             if (key.startsWith('[')) {
                 values = key.slice(1, -1).split(',').map(s => s.trim().replace(/^'|'$/g, ''));
             } else {
-                values = [key.replace(/^'|'$/g, '')];
+                key = key.replace(/^'|'$/g, '');
+                values = key.includes(',') ? key.split(',').map(s => s.trim()) : [key];
             }
             const set = new Set(values);
             return rows.filter(r => set.has(r[field]));
         }
 
-        // @@id('x')
+        // @@id('x') или @@id('1','2','3') / @@id('1,2,3')
         const mid = where.match(/@@id\((.+?)\)$/);
         if (mid) {
             const key = mid[1].trim().replace(/^'|'$/g, '');
-            return rows.filter(r => String(r.id) === key);
+            const hasComma = key.includes(',');
+            const set = hasComma ? new Set(key.split(',').map((s) => s.trim().replace(/^'|'$/g, ''))) : null;
+            return rows.filter((r) => (hasComma ? set.has(String(r.id)) : String(r.id) === key));
         }
 
         return rows.slice();
